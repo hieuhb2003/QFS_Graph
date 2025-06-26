@@ -4,30 +4,26 @@ from typing import Any, final
 
 import numpy as np
 
-
-from magix.types import KnowledgeGraph
-from magix.utils import (
-    logger,
-)
-
-from magix.base import (
+from ..core.base import (
     BaseGraphStorage,
 )
-import pipmaster as pm
+from ..core.types import KnowledgeGraph
+from ..utils.logger_config import get_logger
 
-if not pm.is_installed("networkx"):
-    pm.install("networkx")
-if not pm.is_installed("graspologic"):
-    pm.install("graspologic")
+logger = get_logger()
 
 try:
-    from graspologic import embed
     import networkx as nx
+    GRASPOLOGIC_AVAILABLE = False
+    try:
+        from graspologic import embed
+        GRASPOLOGIC_AVAILABLE = True
+    except ImportError:
+        pass
 except ImportError as e:
     raise ImportError(
         "`networkx` library is not installed. Please install it via pip: `pip install networkx`."
     ) from e
-
 
 @final
 @dataclass
@@ -35,7 +31,16 @@ class NetworkXStorage(BaseGraphStorage):
     @staticmethod
     def load_nx_graph(file_name) -> nx.Graph:
         if os.path.exists(file_name):
-            return nx.read_graphml(file_name)
+            try:
+                # Check if file is not empty
+                if os.path.getsize(file_name) > 0:
+                    return nx.read_graphml(file_name)
+                else:
+                    logger.warning(f"Graph file {file_name} is empty, creating new graph")
+                    return None
+            except Exception as e:
+                logger.warning(f"Error loading graph from {file_name}: {e}, creating new graph")
+                return None
         return None
 
     @staticmethod
@@ -43,7 +48,25 @@ class NetworkXStorage(BaseGraphStorage):
         logger.info(
             f"Writing graph with {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges"
         )
-        nx.write_graphml(graph, file_name)
+        
+        # Clean None values from graph data
+        cleaned_graph = nx.Graph()
+        
+        # Copy nodes and clean None values
+        for node, data in graph.nodes(data=True):
+            cleaned_data = {k: v for k, v in data.items() if v is not None}
+            cleaned_graph.add_node(node, **cleaned_data)
+        
+        # Copy edges and clean None values
+        for source, target, data in graph.edges(data=True):
+            cleaned_data = {k: v for k, v in data.items() if v is not None}
+            cleaned_graph.add_edge(source, target, **cleaned_data)
+        
+        try:
+            nx.write_graphml(cleaned_graph, file_name)
+        except Exception as e:
+            logger.error(f"Error writing graph to {file_name}: {e}")
+            raise
 
     @staticmethod
     def _stabilize_graph(graph: nx.Graph) -> nx.Graph:

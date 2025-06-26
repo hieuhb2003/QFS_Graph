@@ -3,14 +3,16 @@ import os
 from dataclasses import dataclass
 from typing import Any, final
 
-from magix.base import (
+from ..core.base import (
     BaseKVStorage,
 )
-from magix.utils import (
+from ..utils.utils import (
     load_json,
-    logger,
     write_json,
 )
+from ..utils.logger_config import get_logger
+
+logger = get_logger()
 
 
 @final

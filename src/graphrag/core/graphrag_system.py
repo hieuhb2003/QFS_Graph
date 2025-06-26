@@ -11,7 +11,13 @@ from ..db.nano_vector_db_impl import NanoVectorDBStorage
 from ..db.networkx_impl import NetworkXStorage
 from .llm_extractor import LLMExtractor
 from .operators import DocumentOperator, QueryOperator
-from ..utils.utils import compute_hash_with_prefix, create_chunks, normalize_entity_name
+from ..utils.utils import (
+    compute_hash_with_prefix, 
+    create_chunks, 
+    normalize_entity_name,
+    Entity,
+    Relation
+)
 from ..clients.llm_client import BaseLLMClient
 from ..clients.embedding_client import BaseEmbeddingClient
 
@@ -39,31 +45,40 @@ class GraphRAGSystem:
         os.makedirs(working_dir, exist_ok=True)
         
         # Khởi tạo các database
-        self.doc_status_db = JsonDocStatusStorage(
+        self._doc_status_db = JsonDocStatusStorage(
             namespace="doc_status",
             global_config=global_config
         )
         
-        self.chunk_db = JsonKVStorage(
+        self._chunk_db = JsonKVStorage(
             namespace="chunks",
-            global_config=global_config
+            global_config=global_config,
+            embedding_func=self._embedding_wrapper
         )
         
-        self.entity_db = NanoVectorDBStorage(
+        # Thêm chunk VDB để lưu chunks vào vector database
+        self._chunk_vdb = NanoVectorDBStorage(
+            namespace="chunks_vdb",
+            embedding_func=self._embedding_wrapper,
+            global_config=global_config,
+            meta_fields=["doc_id", "chunk_index"]
+        )
+        
+        self._entity_db = NanoVectorDBStorage(
             namespace="entities",
             embedding_func=self._embedding_wrapper,
             global_config=global_config,
             meta_fields=["entity_name", "description", "chunk_id", "doc_id"]
         )
         
-        self.relation_db = NanoVectorDBStorage(
+        self._relation_db = NanoVectorDBStorage(
             namespace="relations", 
             embedding_func=self._embedding_wrapper,
             global_config=global_config,
             meta_fields=["source_entity", "relation_description", "target_entity", "chunk_id", "doc_id"]
         )
         
-        self.graph_db = NetworkXStorage(
+        self._graph_db = NetworkXStorage(
             namespace="knowledge_graph",
             global_config=global_config
         )
@@ -73,20 +88,20 @@ class GraphRAGSystem:
         
         # Khởi tạo operators
         self.doc_operator = DocumentOperator(
-            self.doc_status_db,
-            self.chunk_db,
-            self.entity_db,
-            self.relation_db,
-            self.graph_db,
+            self._doc_status_db,
+            self._chunk_db,
+            self._entity_db,
+            self._relation_db,
+            self._graph_db,
             self.llm_extractor
         )
         
         self.query_operator = QueryOperator(
-            self.entity_db,
-            self.relation_db,
-            self.graph_db,
-            self.chunk_db,
-            self.doc_status_db
+            self._entity_db,
+            self._relation_db,
+            self._graph_db,
+            self._chunk_db,
+            self._doc_status_db
         )
         
         self.logger.info(f"GraphRAG System initialized successfully in {working_dir}")
@@ -141,14 +156,14 @@ class GraphRAGSystem:
         """
         try:
             # Check document status
-            doc_status = await self.doc_status_db.get_by_id(doc_id)
+            doc_status = await self._doc_status_db.get_by_id(doc_id)
             
             if doc_status and doc_status.get("status") == "success":
                 self.logger.info(f"Document {doc_id} already processed successfully, skipping")
                 return True
             
             # Update status to pending
-            await self.doc_status_db.upsert({
+            await self._doc_status_db.upsert({
                 doc_id: {
                     "status": "pending",
                     "content": content,
@@ -159,24 +174,19 @@ class GraphRAGSystem:
             # Extract entities and relations using LLM (one-shot)
             entities, relations = await self.llm_extractor.extract_from_text(content)
             
-            # Set doc_id for all entities and relations
-            doc_hash = compute_hash_with_prefix(content, "doc-")
+            # Set doc_id and chunk_id đúng chuẩn
+            chunk_hash = compute_hash_with_prefix(content, "chunk-")
+            
             for entity in entities:
-                entity.doc_id = doc_hash
-                entity.chunk_id = doc_hash  # Use doc as chunk for one-shot
+                entity.doc_id = doc_id
+                entity.chunk_id = chunk_hash  # Sử dụng chunk- prefix cho chunk_id
             
             for relation in relations:
-                relation.doc_id = doc_hash
-                relation.chunk_id = doc_hash  # Use doc as chunk for one-shot
+                relation.doc_id = doc_id
+                relation.chunk_id = chunk_hash  # Sử dụng chunk- prefix cho chunk_id
             
-            # Save document as single chunk
-            await self.chunk_db.upsert({
-                doc_hash: {
-                    "content": content,
-                    "doc_id": doc_hash,
-                    "chunk_index": 0
-                }
-            })
+            # Save document as single chunk using _save_chunks
+            await self._save_chunks([content], doc_id)
             
             # Save entities to vector DB
             if entities:
@@ -187,10 +197,13 @@ class GraphRAGSystem:
                 await self.doc_operator._save_relations(relations)
             
             # Update graph
-            await self.doc_operator._update_graph(entities, relations)
+            await self._update_graph(entities, relations)
+            
+            # Save all data immediately
+            await self._save_all_data()
             
             # Update status to success
-            await self.doc_status_db.upsert({
+            await self._doc_status_db.upsert({
                 doc_id: {
                     "status": "success",
                     "content": content,
@@ -209,7 +222,7 @@ class GraphRAGSystem:
             self.logger.error(f"Error processing document {doc_id} with LLM: {e}")
             
             # Update status to failed
-            await self.doc_status_db.upsert({
+            await self._doc_status_db.upsert({
                 doc_id: {
                     "status": "failed",
                     "content": content,
@@ -221,12 +234,12 @@ class GraphRAGSystem:
             
             return False
     
-    async def insert_documents_batch(self, documents: List[Dict[str, str]], chunk_size: int = 1000, max_concurrent_docs: int = 5) -> List[bool]:
+    async def insert_documents_batch(self, documents: List[str], chunk_size: int = 1000, max_concurrent_docs: int = 5) -> List[bool]:
         """
         Insert nhiều documents song song
         
         Args:
-            documents: List of documents [{"doc_id": "doc1", "content": "content1"}, ...]
+            documents: List of document contents
             chunk_size: Kích thước chunk
             max_concurrent_docs: Số documents tối đa chạy song song
             
@@ -238,21 +251,21 @@ class GraphRAGSystem:
         # Semaphore để giới hạn số documents chạy song song
         semaphore = asyncio.Semaphore(max_concurrent_docs)
         
-        async def process_single_document(doc_data: Dict[str, str]) -> bool:
+        async def process_single_document(content: str) -> bool:
             async with semaphore:
-                doc_id = doc_data["doc_id"]
-                content = doc_data["content"]
+                # Tính doc_id từ content
+                doc_id = compute_hash_with_prefix(content, "doc-")
                 
                 try:
                     # Check document status
-                    doc_status = await self.doc_status_db.get_by_id(doc_id)
+                    doc_status = await self._doc_status_db.get_by_id(doc_id)
                     
                     if doc_status and doc_status.get("status") == "success":
                         self.logger.info(f"Document {doc_id} already processed successfully, skipping")
                         return True
                     
                     # Update status to pending
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "pending",
                             "content": content,
@@ -281,8 +294,11 @@ class GraphRAGSystem:
                     # Update graph
                     await self._update_graph(all_entities, all_relations)
                     
+                    # Save all data immediately
+                    await self._save_all_data()
+                    
                     # Update status to success
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "success",
                             "content": content,
@@ -301,7 +317,7 @@ class GraphRAGSystem:
                     self.logger.error(f"Error processing document {doc_id}: {e}")
                     
                     # Update status to failed
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "failed",
                             "content": content,
@@ -314,7 +330,7 @@ class GraphRAGSystem:
                     return False
         
         # Tạo tasks cho tất cả documents
-        tasks = [process_single_document(doc) for doc in documents]
+        tasks = [process_single_document(content) for content in documents]
         
         # Chạy song song tất cả documents
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -323,7 +339,8 @@ class GraphRAGSystem:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                self.logger.error(f"Exception in document {documents[i]['doc_id']}: {result}")
+                doc_id = compute_hash_with_prefix(documents[i], "doc-")
+                self.logger.error(f"Exception in document {doc_id}: {result}")
                 processed_results.append(False)
             else:
                 processed_results.append(result)
@@ -333,12 +350,12 @@ class GraphRAGSystem:
         
         return processed_results
 
-    async def insert_documents_batch_with_llm(self, documents: List[Dict[str, str]], max_concurrent_docs: int = 5) -> List[bool]:
+    async def insert_documents_batch_with_llm(self, documents: List[str], max_concurrent_docs: int = 5) -> List[bool]:
         """
         Insert nhiều documents song song với LLM extraction (one-shot)
         
         Args:
-            documents: List of documents [{"doc_id": "doc1", "content": "content1"}, ...]
+            documents: List of document contents
             max_concurrent_docs: Số documents tối đa chạy song song
             
         Returns:
@@ -349,21 +366,21 @@ class GraphRAGSystem:
         # Semaphore để giới hạn số documents chạy song song
         semaphore = asyncio.Semaphore(max_concurrent_docs)
         
-        async def process_single_document_llm(doc_data: Dict[str, str]) -> bool:
+        async def process_single_document_llm(content: str) -> bool:
             async with semaphore:
-                doc_id = doc_data["doc_id"]
-                content = doc_data["content"]
+                # Tính doc_id từ content
+                doc_id = compute_hash_with_prefix(content, "doc-")
                 
                 try:
                     # Check document status
-                    doc_status = await self.doc_status_db.get_by_id(doc_id)
+                    doc_status = await self._doc_status_db.get_by_id(doc_id)
                     
                     if doc_status and doc_status.get("status") == "success":
                         self.logger.info(f"Document {doc_id} already processed successfully, skipping")
                         return True
                     
                     # Update status to pending
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "pending",
                             "content": content,
@@ -374,24 +391,19 @@ class GraphRAGSystem:
                     # Extract entities and relations using LLM (one-shot)
                     entities, relations = await self.llm_extractor.extract_from_text(content)
                     
-                    # Set doc_id for all entities and relations
-                    doc_hash = compute_hash_with_prefix(content, "doc-")
+                    # Set doc_id and chunk_id đúng chuẩn
+                    chunk_hash = compute_hash_with_prefix(content, "chunk-")
+                    
                     for entity in entities:
-                        entity.doc_id = doc_hash
-                        entity.chunk_id = doc_hash  # Use doc as chunk for one-shot
+                        entity.doc_id = doc_id
+                        entity.chunk_id = chunk_hash  # Sử dụng chunk- prefix cho chunk_id
                     
                     for relation in relations:
-                        relation.doc_id = doc_hash
-                        relation.chunk_id = doc_hash  # Use doc as chunk for one-shot
+                        relation.doc_id = doc_id
+                        relation.chunk_id = chunk_hash  # Sử dụng chunk- prefix cho chunk_id
                     
-                    # Save document as single chunk
-                    await self.chunk_db.upsert({
-                        doc_hash: {
-                            "content": content,
-                            "doc_id": doc_hash,
-                            "chunk_index": 0
-                        }
-                    })
+                    # Save document as single chunk using _save_chunks
+                    await self._save_chunks([content], doc_id)
                     
                     # Save entities to vector DB
                     if entities:
@@ -404,8 +416,11 @@ class GraphRAGSystem:
                     # Update graph
                     await self._update_graph(entities, relations)
                     
+                    # Save all data immediately
+                    await self._save_all_data()
+                    
                     # Update status to success
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "success",
                             "content": content,
@@ -413,7 +428,7 @@ class GraphRAGSystem:
                             "entities_count": len(entities),
                             "relations_count": len(relations),
                             "chunks_count": 1,
-                            "processing_type": "batch_one_shot"
+                            "processing_type": "one_shot"
                         }
                     })
                     
@@ -424,20 +439,20 @@ class GraphRAGSystem:
                     self.logger.error(f"Error processing document {doc_id} with LLM: {e}")
                     
                     # Update status to failed
-                    await self.doc_status_db.upsert({
+                    await self._doc_status_db.upsert({
                         doc_id: {
                             "status": "failed",
                             "content": content,
                             "timestamp": asyncio.get_event_loop().time(),
                             "error": str(e),
-                            "processing_type": "batch_one_shot"
+                            "processing_type": "one_shot"
                         }
                     })
                     
                     return False
         
         # Tạo tasks cho tất cả documents
-        tasks = [process_single_document_llm(doc) for doc in documents]
+        tasks = [process_single_document_llm(content) for content in documents]
         
         # Chạy song song tất cả documents
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -446,7 +461,8 @@ class GraphRAGSystem:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                self.logger.error(f"Exception in document {documents[i]['doc_id']}: {result}")
+                doc_id = compute_hash_with_prefix(documents[i], "doc-")
+                self.logger.error(f"Exception in document {doc_id}: {result}")
                 processed_results.append(False)
             else:
                 processed_results.append(result)
@@ -456,20 +472,49 @@ class GraphRAGSystem:
         
         return processed_results
 
+    async def _save_all_data(self):
+        """Save tất cả data ngay lập tức"""
+        self.logger.info("Saving all data immediately...")
+        
+        # Save all databases
+        await self._doc_status_db.index_done_callback()
+        await self._chunk_db.index_done_callback()
+        await self._chunk_vdb.index_done_callback()
+        await self._entity_db.index_done_callback()
+        await self._relation_db.index_done_callback()
+        await self._graph_db.index_done_callback()
+        
+        self.logger.info("All data saved successfully")
+
     async def _save_chunks(self, chunks: List[str], doc_id: str):
-        """Lưu chunks vào database"""
+        """Lưu chunks vào database và VDB"""
         chunk_data = {}
+        chunk_vdb_data = {}
+        
         for i, chunk_content in enumerate(chunks):
             chunk_id = compute_hash_with_prefix(chunk_content, "chunk-")
+            
+            # Lưu vào JSON database
             chunk_data[chunk_id] = {
+                "content": chunk_content,
+                "doc_id": doc_id,
+                "chunk_index": i
+            }
+            
+            # Lưu vào VDB
+            chunk_vdb_data[chunk_id] = {
                 "content": chunk_content,
                 "doc_id": doc_id,
                 "chunk_index": i
             }
         
         if chunk_data:
-            await self.chunk_db.upsert(chunk_data)
-            self.logger.info(f"Saved {len(chunk_data)} chunks for document {doc_id}")
+            await self._chunk_db.upsert(chunk_data)
+            self.logger.info(f"Saved {len(chunk_data)} chunks to JSON database for document {doc_id}")
+        
+        if chunk_vdb_data:
+            await self._chunk_vdb.upsert(chunk_vdb_data)
+            self.logger.info(f"Saved {len(chunk_vdb_data)} chunks to VDB for document {doc_id}")
 
     async def _save_entities(self, entities: List[Entity]):
         """Lưu entities vào vector DB"""
@@ -485,7 +530,7 @@ class GraphRAGSystem:
             }
         
         if entity_data:
-            await self.entity_db.upsert(entity_data)
+            await self._entity_db.upsert(entity_data)
             self.logger.info(f"Saved {len(entity_data)} entities to vector DB")
 
     async def _save_relations(self, relations: List[Relation]):
@@ -506,7 +551,7 @@ class GraphRAGSystem:
             }
         
         if relation_data:
-            await self.relation_db.upsert(relation_data)
+            await self._relation_db.upsert(relation_data)
             self.logger.info(f"Saved {len(relation_data)} relations to vector DB")
 
     async def _update_graph(self, entities: List[Entity], relations: List[Relation]):
@@ -526,19 +571,19 @@ class GraphRAGSystem:
             descriptions = [entity.description for entity in entity_list]
             combined_description = " <|> ".join(descriptions)
             
-            # Combine chunk IDs
-            chunk_ids = [entity.chunk_id for entity in entity_list]
+            # Lưu chunk IDs theo format cũ với ký tự đặc biệt
+            chunk_ids = list(set([entity.chunk_id for entity in entity_list]))  # Remove duplicates
             combined_chunk_ids = " <|> ".join(chunk_ids)
             
             # Create or update node
             node_data = {
                 "entity_name": normalized_name,
                 "description": combined_description,
-                "source": combined_chunk_ids,
+                "source": combined_chunk_ids,  # Lưu theo format cũ
                 "topic_id": None
             }
             
-            await self.graph_db.upsert_node(normalized_name, node_data)
+            await self._graph_db.upsert_node(normalized_name, node_data)
         
         # Add relations as edges
         for relation in relations:
@@ -547,11 +592,11 @@ class GraphRAGSystem:
             
             edge_data = {
                 "relation_description": relation.relation_description,
-                "chunk_id": relation.chunk_id,
+                "chunk_id": relation.chunk_id,  # Lưu chunk ID cụ thể của relation
                 "doc_id": relation.doc_id
             }
             
-            await self.graph_db.upsert_edge(source_normalized, target_normalized, edge_data)
+            await self._graph_db.upsert_edge(source_normalized, target_normalized, edge_data)
         
         self.logger.info(f"Updated graph with {len(entity_groups)} entities and {len(relations)} relations")
 
@@ -598,6 +643,10 @@ class GraphRAGSystem:
         return self._chunk_db
     
     @property
+    def chunk_vdb(self):
+        return self._chunk_vdb
+    
+    @property
     def entity_db(self):
         return self._entity_db
     
@@ -618,11 +667,12 @@ class GraphRAGSystem:
         self.llm_extractor.cleanup()
         
         # Save all databases
-        await self.doc_status_db.index_done_callback()
-        await self.chunk_db.index_done_callback()
-        await self.entity_db.index_done_callback()
-        await self.relation_db.index_done_callback()
-        await self.graph_db.index_done_callback()
+        await self._doc_status_db.index_done_callback()
+        await self._chunk_db.index_done_callback()
+        await self._chunk_vdb.index_done_callback()
+        await self._entity_db.index_done_callback()
+        await self._relation_db.index_done_callback()
+        await self._graph_db.index_done_callback()
         
         self.logger.info("Cleanup completed successfully")
     
@@ -634,18 +684,18 @@ class GraphRAGSystem:
             status_counts = await self.get_status_counts()
             
             # Get graph stats
-            graph = self.graph_db._graph
+            graph = self._graph_db._graph
             graph_stats = {
                 "nodes": graph.number_of_nodes(),
                 "edges": graph.number_of_edges()
             }
             
             # Get vector DB stats
-            entity_count = len(self.entity_db.client_storage["data"])
-            relation_count = len(self.relation_db.client_storage["data"])
+            entity_count = len(self._entity_db.client_storage["data"])
+            relation_count = len(self._relation_db.client_storage["data"])
             
             # Get chunk count
-            chunk_count = len(self.chunk_db._data)
+            chunk_count = len(self._chunk_db._data)
             
             return {
                 "document_status": status_counts,

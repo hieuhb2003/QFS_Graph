@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 from typing import Any, final, Dict, List,TypedDict, Callable, Tuple
@@ -9,17 +8,15 @@ import base64
 from tqdm import trange
 import time
 
-from magix.utils import (
-    logger,
-    compute_mdhash_id,
-)
-import pipmaster as pm
-from magix.base import (
+from ..core.base import (
     BaseVectorStorage,
 )
+from ..utils.utils import (
+    compute_hash_with_prefix,
+)
+from ..utils.logger_config import get_logger
 
-if not pm.is_installed("nano-vectordb"):
-    pm.install("nano-vectordb")
+logger = get_logger()
 
 try:
     from nano_vectordb import NanoVectorDB
@@ -487,8 +484,11 @@ class NanoVectorDBStorage(BaseVectorStorage):
             self.global_config["working_dir"], f"vdb_{self.namespace}.json"
         )
         self._max_batch_size = self.global_config["embedding_batch_num"]
+        
+        # Get embedding dimension from global config
+        embedding_dim = self.global_config.get("embedding_dimension", 384)  # Default to 384
         self._client = NanoVectorDB(
-            self.embedding_func.embedding_dim, storage_file=self._client_file_name
+            embedding_dim, storage_file=self._client_file_name
         )
 
     async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
@@ -567,7 +567,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
 
     async def delete_entity(self, entity_name: str) -> None:
         try:
-            entity_id = compute_mdhash_id(entity_name, prefix="ent-")
+            entity_id = compute_hash_with_prefix(entity_name, prefix="ent-")
             logger.debug(
                 f"Attempting to delete entity {entity_name} with ID {entity_id}"
             )
@@ -676,3 +676,4 @@ class NanoVectorDBStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"An unexpected error occurred in find_similar_vdb_pairs: {e}", exc_info=True)
             return [] # Return empty list on unexpected errors
+

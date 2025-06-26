@@ -2,16 +2,18 @@ from dataclasses import dataclass
 import os
 from typing import Any, Union, final
 
-from magix.base import (
+from ..core.base import (
     DocProcessingStatus,
     DocStatus,
     DocStatusStorage,
 )
-from magix.utils import (
+from ..utils.utils import (
     load_json,
-    logger,
     write_json,
 )
+from ..utils.logger_config import get_logger
+
+logger = get_logger()
 
 
 @final

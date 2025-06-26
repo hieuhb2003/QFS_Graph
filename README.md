@@ -114,9 +114,9 @@ success = await system.insert_document(
 
 # Batch processing - xử lý nhiều documents song song
 documents_batch = [
-    {"doc_id": "doc1", "content": "Apple Inc. is a technology company..."},
-    {"doc_id": "doc2", "content": "Microsoft Corporation is a multinational..."},
-    {"doc_id": "doc3", "content": "Google LLC is a technology company..."}
+    "Apple Inc. is a technology company that designs and manufactures consumer electronics...",
+    "Microsoft Corporation is a multinational technology company...",
+    "Google LLC is a technology company that specializes in internet-related services..."
 ]
 
 # Batch processing với LLM one-shot

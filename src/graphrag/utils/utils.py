@@ -2,7 +2,8 @@ import hashlib
 import re
 from typing import List, Tuple
 from dataclasses import dataclass
-
+import os
+import json
 
 @dataclass
 class Entity:
@@ -100,3 +101,14 @@ def validate_entity_relation_format(text: str) -> bool:
     has_relation = bool(re.search(relation_pattern, text, re.DOTALL))
     
     return has_entity or has_relation 
+
+def load_json(file_name):
+    if not os.path.exists(file_name):
+        return None
+    with open(file_name, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(json_obj, file_name):
+    with open(file_name, "w", encoding="utf-8") as f:
+        json.dump(json_obj, f, indent=2, ensure_ascii=False)

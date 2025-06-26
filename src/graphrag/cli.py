@@ -12,6 +12,7 @@ from .utils.logger_config import setup_logger
 from .core.graphrag_system import GraphRAGSystem
 from .clients.llm_client import create_llm_client
 from .clients.embedding_client import create_embedding_client
+from .utils.utils import compute_hash_with_prefix
 
 
 def create_parser():
@@ -129,19 +130,13 @@ async def process_documents(args):
         # Single file
         with open(input_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        documents.append({
-            "doc_id": input_path.stem,
-            "content": content
-        })
+        documents.append(content)
     elif input_path.is_dir():
         # Directory - collect all text files
         for file_path in input_path.glob("*.txt"):
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            documents.append({
-                "doc_id": file_path.stem,
-                "content": content
-            })
+            documents.append(content)
     
     if not documents:
         logger.error("No documents found to process")
@@ -168,29 +163,31 @@ async def process_documents(args):
         logger.info(f"Batch processing completed: {success_count}/{len(documents)} documents successful")
         
         for i, success in enumerate(results):
+            doc_id = compute_hash_with_prefix(documents[i], "doc-")
             if success:
-                logger.info(f"Successfully processed {documents[i]['doc_id']}")
+                logger.info(f"Successfully processed {doc_id}")
             else:
-                logger.error(f"Failed to process {documents[i]['doc_id']}")
+                logger.error(f"Failed to process {doc_id}")
     else:
         # Sequential processing
-        for doc in documents:
+        for content in documents:
+            doc_id = compute_hash_with_prefix(content, "doc-")
             if llm_client:
                 success = await system.insert_document_with_llm(
-                    doc_id=doc['doc_id'],
-                    content=doc['content']
+                    doc_id=doc_id,
+                    content=content
                 )
             else:
                 success = await system.insert_document(
-                    doc_id=doc['doc_id'],
-                    content=doc['content'],
+                    doc_id=doc_id,
+                    content=content,
                     chunk_size=args.chunk_size
                 )
             
             if success:
-                logger.info(f"Successfully processed {doc['doc_id']}")
+                logger.info(f"Successfully processed {doc_id}")
             else:
-                logger.error(f"Failed to process {doc['doc_id']}")
+                logger.error(f"Failed to process {doc_id}")
     
     # Cleanup
     await system.cleanup()

@@ -118,45 +118,154 @@ class DocumentOperator:
             self.logger.info(f"Saved {len(chunk_data)} chunks for document {doc_id}")
     
     async def _save_entities(self, entities: List[Entity]):
-        """Lưu entities vào vector DB"""
+        """Lưu entities vào vector DB với deduplication"""
         entity_data = {}
+        existing_entities = {}
+        
+        # Get existing entities to check for duplicates
+        try:
+            # Query existing entities to check for duplicates
+            existing_results = await self.entity_db.query("", top_k=1000)  # Get all entities
+            for result in existing_results:
+                existing_name = result.get('entity_name', '')
+                if existing_name:
+                    existing_entities[existing_name.lower()] = result
+        except Exception as e:
+            self.logger.warning(f"Could not fetch existing entities: {e}")
+        
         for entity in entities:
-            entity_key = compute_hash_with_prefix(f"{entity.entity_name} {entity.description}", "ent-")
-            entity_data[entity_key] = {
-                "content": f"{entity.entity_name} {entity.description}",
-                "entity_name": entity.entity_name,
-                "description": entity.description,
-                "chunk_id": entity.chunk_id,
-                "doc_id": entity.doc_id
-            }
+            # Use normalized entity name as key for deduplication
+            normalized_name = normalize_entity_name(entity.entity_name)
+            entity_key = compute_hash_with_prefix(normalized_name, "ent-")
+            
+            # Check if entity already exists
+            existing_entity = existing_entities.get(entity.entity_name.lower())
+            
+            if existing_entity:
+                # Merge with existing entity
+                existing_description = existing_entity.get('description', '')
+                existing_chunk_ids = existing_entity.get('chunk_id', '')
+                existing_doc_ids = existing_entity.get('doc_id', '')
+                
+                # Combine descriptions
+                if entity.description not in existing_description:
+                    combined_description = f"{existing_description} <|> {entity.description}"
+                else:
+                    combined_description = existing_description
+                
+                # Combine chunk IDs
+                if entity.chunk_id not in existing_chunk_ids:
+                    combined_chunk_ids = f"{existing_chunk_ids} <|> {entity.chunk_id}"
+                else:
+                    combined_chunk_ids = existing_chunk_ids
+                
+                # Combine doc IDs
+                if entity.doc_id not in existing_doc_ids:
+                    combined_doc_ids = f"{existing_doc_ids} <|> {entity.doc_id}"
+                else:
+                    combined_doc_ids = existing_doc_ids
+                
+                entity_data[entity_key] = {
+                    "content": f"{normalized_name} {combined_description}",
+                    "entity_name": normalized_name,
+                    "description": combined_description,
+                    "chunk_id": combined_chunk_ids,
+                    "doc_id": combined_doc_ids
+                }
+                
+                self.logger.debug(f"Merged entity: {normalized_name}")
+            else:
+                # New entity
+                entity_data[entity_key] = {
+                    "content": f"{normalized_name} {entity.description}",
+                    "entity_name": normalized_name,
+                    "description": entity.description,
+                    "chunk_id": entity.chunk_id,
+                    "doc_id": entity.doc_id
+                }
         
         if entity_data:
             await self.entity_db.upsert(entity_data)
-            self.logger.info(f"Saved {len(entity_data)} entities to vector DB")
+            self.logger.info(f"Saved {len(entity_data)} entities to vector DB (with deduplication)")
     
     async def _save_relations(self, relations: List[Relation]):
-        """Lưu relations vào vector DB"""
+        """Lưu relations vào vector DB với deduplication"""
         relation_data = {}
+        existing_relations = {}
+        
+        # Get existing relations to check for duplicates
+        try:
+            # Query existing relations to check for duplicates
+            existing_results = await self.relation_db.query("", top_k=1000)  # Get all relations
+            for result in existing_results:
+                source = result.get('source_entity', '')
+                target = result.get('target_entity', '')
+                rel_desc = result.get('relation_description', '')
+                if source and target and rel_desc:
+                    key = f"{source.lower()}_{rel_desc.lower()}_{target.lower()}"
+                    existing_relations[key] = result
+        except Exception as e:
+            self.logger.warning(f"Could not fetch existing relations: {e}")
+        
         for relation in relations:
+            # Normalize entity names
+            source_normalized = normalize_entity_name(relation.source_entity)
+            target_normalized = normalize_entity_name(relation.target_entity)
+            
+            # Create unique key for deduplication
             relation_key = compute_hash_with_prefix(
-                f"{relation.source_entity} {relation.relation_description} {relation.target_entity}",
+                f"{source_normalized} {relation.relation_description} {target_normalized}",
                 "rel-"
             )
-            relation_data[relation_key] = {
-                "content": f"{relation.source_entity} {relation.relation_description} {relation.target_entity}",
-                "source_entity": relation.source_entity,
-                "relation_description": relation.relation_description,
-                "target_entity": relation.target_entity,
-                "chunk_id": relation.chunk_id,
-                "doc_id": relation.doc_id
-            }
+            
+            # Check if relation already exists
+            existing_key = f"{source_normalized.lower()}_{relation.relation_description.lower()}_{target_normalized.lower()}"
+            existing_relation = existing_relations.get(existing_key)
+            
+            if existing_relation:
+                # Merge with existing relation
+                existing_chunk_ids = existing_relation.get('chunk_id', '')
+                existing_doc_ids = existing_relation.get('doc_id', '')
+                
+                # Combine chunk IDs
+                if relation.chunk_id not in existing_chunk_ids:
+                    combined_chunk_ids = f"{existing_chunk_ids} <|> {relation.chunk_id}"
+                else:
+                    combined_chunk_ids = existing_chunk_ids
+                
+                # Combine doc IDs
+                if relation.doc_id not in existing_doc_ids:
+                    combined_doc_ids = f"{existing_doc_ids} <|> {relation.doc_id}"
+                else:
+                    combined_doc_ids = existing_doc_ids
+                
+                relation_data[relation_key] = {
+                    "content": f"{source_normalized} {relation.relation_description} {target_normalized}",
+                    "source_entity": source_normalized,
+                    "relation_description": relation.relation_description,
+                    "target_entity": target_normalized,
+                    "chunk_id": combined_chunk_ids,
+                    "doc_id": combined_doc_ids
+                }
+                
+                self.logger.debug(f"Merged relation: {source_normalized} -> {relation.relation_description} -> {target_normalized}")
+            else:
+                # New relation
+                relation_data[relation_key] = {
+                    "content": f"{source_normalized} {relation.relation_description} {target_normalized}",
+                    "source_entity": source_normalized,
+                    "relation_description": relation.relation_description,
+                    "target_entity": target_normalized,
+                    "chunk_id": relation.chunk_id,
+                    "doc_id": relation.doc_id
+                }
         
         if relation_data:
             await self.relation_db.upsert(relation_data)
-            self.logger.info(f"Saved {len(relation_data)} relations to vector DB")
+            self.logger.info(f"Saved {len(relation_data)} relations to vector DB (with deduplication)")
     
     async def _update_graph(self, entities: List[Entity], relations: List[Relation]):
-        """Cập nhật knowledge graph"""
+        """Cập nhật knowledge graph với deduplication"""
         # Group entities by normalized name
         entity_groups = {}
         
@@ -168,38 +277,106 @@ class DocumentOperator:
         
         # Merge entities with same normalized name
         for normalized_name, entity_list in entity_groups.items():
-            # Combine descriptions
-            descriptions = [entity.description for entity in entity_list]
-            combined_description = " <|> ".join(descriptions)
+            # Check if node already exists
+            existing_node = await self.graph_db.get_node(normalized_name)
             
-            # Combine chunk IDs
-            chunk_ids = [entity.chunk_id for entity in entity_list]
-            combined_chunk_ids = " <|> ".join(chunk_ids)
-            
-            # Create or update node
-            node_data = {
-                "entity_name": normalized_name,
-                "description": combined_description,
-                "source": combined_chunk_ids,
-                "topic_id": None
-            }
+            if existing_node:
+                # Merge with existing node
+                existing_description = existing_node.get('description', '')
+                existing_source = existing_node.get('source', '')
+                
+                # Combine descriptions
+                new_descriptions = [entity.description for entity in entity_list]
+                for desc in new_descriptions:
+                    if desc not in existing_description:
+                        if existing_description:
+                            existing_description = f"{existing_description} <|> {desc}"
+                        else:
+                            existing_description = desc
+                
+                # Combine chunk IDs
+                new_chunk_ids = [entity.chunk_id for entity in entity_list]
+                for chunk_id in new_chunk_ids:
+                    if chunk_id not in existing_source:
+                        if existing_source:
+                            existing_source = f"{existing_source} <|> {chunk_id}"
+                        else:
+                            existing_source = chunk_id
+                
+                node_data = {
+                    "entity_name": normalized_name,
+                    "description": existing_description,
+                    "source": existing_source,
+                    "topic_id": None
+                }
+                
+                self.logger.debug(f"Merged graph node: {normalized_name}")
+            else:
+                # New node
+                descriptions = [entity.description for entity in entity_list]
+                combined_description = " <|> ".join(descriptions)
+                
+                chunk_ids = [entity.chunk_id for entity in entity_list]
+                combined_chunk_ids = " <|> ".join(chunk_ids)
+                
+                node_data = {
+                    "entity_name": normalized_name,
+                    "description": combined_description,
+                    "source": combined_chunk_ids,
+                    "topic_id": None
+                }
             
             await self.graph_db.upsert_node(normalized_name, node_data)
         
-        # Add relations as edges
+        # Add relations as edges with deduplication
         for relation in relations:
             source_normalized = normalize_entity_name(relation.source_entity)
             target_normalized = normalize_entity_name(relation.target_entity)
             
-            edge_data = {
-                "relation_description": relation.relation_description,
-                "chunk_id": relation.chunk_id,
-                "doc_id": relation.doc_id
-            }
+            # Check if edge already exists
+            existing_edge = await self.graph_db.get_edge(source_normalized, target_normalized)
+            
+            if existing_edge:
+                # Merge with existing edge
+                existing_chunk_id = existing_edge.get('chunk_id', '')
+                existing_doc_id = existing_edge.get('doc_id', '')
+                
+                # Combine chunk IDs
+                if relation.chunk_id not in existing_chunk_id:
+                    if existing_chunk_id:
+                        combined_chunk_id = f"{existing_chunk_id} <|> {relation.chunk_id}"
+                    else:
+                        combined_chunk_id = relation.chunk_id
+                else:
+                    combined_chunk_id = existing_chunk_id
+                
+                # Combine doc IDs
+                if relation.doc_id not in existing_doc_id:
+                    if existing_doc_id:
+                        combined_doc_id = f"{existing_doc_id} <|> {relation.doc_id}"
+                    else:
+                        combined_doc_id = relation.doc_id
+                else:
+                    combined_doc_id = existing_doc_id
+                
+                edge_data = {
+                    "relation_description": relation.relation_description,
+                    "chunk_id": combined_chunk_id,
+                    "doc_id": combined_doc_id
+                }
+                
+                self.logger.debug(f"Merged graph edge: {source_normalized} -> {target_normalized}")
+            else:
+                # New edge
+                edge_data = {
+                    "relation_description": relation.relation_description,
+                    "chunk_id": relation.chunk_id,
+                    "doc_id": relation.doc_id
+                }
             
             await self.graph_db.upsert_edge(source_normalized, target_normalized, edge_data)
         
-        self.logger.info(f"Updated graph with {len(entity_groups)} entities and {len(relations)} relations")
+        self.logger.info(f"Updated graph with {len(entity_groups)} entities and {len(relations)} relations (with deduplication)")
 
 
 class QueryOperator:
@@ -274,11 +451,28 @@ class QueryOperator:
         normalized_name = normalize_entity_name(entity_name)
         self.logger.debug(f"Getting graph context for entity: {normalized_name}")
         
-        # Get entity node data
+        # Try to get entity node data with normalized name
         node_data = await self.graph_db.get_node_data(normalized_name)
+        
+        # If not found, try to find similar node names
         if not node_data:
-            self.logger.warning(f"Entity not found: {normalized_name}")
-            return {"error": "Entity not found"}
+            # Get all nodes and find the best match
+            all_nodes = list(self.graph_db._graph.nodes())
+            best_match = None
+            
+            # Look for exact match first
+            for node in all_nodes:
+                if entity_name.lower() in node.lower() or node.lower() in entity_name.lower():
+                    best_match = node
+                    break
+            
+            if best_match:
+                node_data = await self.graph_db.get_node_data(best_match)
+                normalized_name = best_match
+                self.logger.debug(f"Found similar entity: {best_match}")
+            else:
+                self.logger.warning(f"Entity not found: {entity_name}")
+                return {"error": "Entity not found"}
         
         # Get neighbors
         neighbors = await self.graph_db.get_connected_nodes_with_edges(normalized_name)
