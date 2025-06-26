@@ -84,6 +84,9 @@ ipython_config.py
 
 logs/
 graphrag_data/
+cluster_example.py
+down_dataset.ipynb
+cluster_new.py
 
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is

@@ -1,342 +1,369 @@
 # GraphRAG System
 
-Hệ thống GraphRAG tích hợp với NetworkX và Vector Database để xử lý documents, extract entities và relations, và xây dựng knowledge graph.
+A comprehensive Graph-based Retrieval-Augmented Generation (GraphRAG) system that integrates document processing, entity-relation extraction, knowledge graph construction, and dynamic topic clustering.
 
-## Tính năng chính
+## Features
 
-- **Document Processing**: Chunking và tracking trạng thái xử lý documents
-- **LLM Integration**: Hỗ trợ nhiều LLM clients (vLLM, OpenAI) cho entity/relation extraction
-- **Embedding Support**: Nhiều embedding clients (Sentence Transformers, vLLM, OpenAI)
-- **Vector Database**: Lưu trữ entities và relations với semantic search
-- **Knowledge Graph**: Xây dựng graph với NetworkX, merge entities, track relations
-- **Logging System**: Comprehensive logging với file và console output
-- **Async Processing**: Multi-threaded processing cho performance tốt
+### Core Features
 
-## Cấu trúc project
+- **Document Processing**: Chunk-based document processing with configurable chunk sizes
+- **Entity-Relation Extraction**: LLM-powered extraction of entities and relations from documents
+- **Knowledge Graph Construction**: Automatic building of knowledge graphs using NetworkX
+- **Vector Database Integration**: Multi-vector database support for efficient similarity search
+- **Batch Processing**: Concurrent document processing with configurable concurrency limits
+
+### 🆕 Dynamic Topic Clustering
+
+- **BERTopic Integration**: Automatic topic discovery using BERTopic clustering
+- **Incremental Learning**: Dynamic model updates when new outlier documents are detected
+- **Outlier Buffer Management**: Intelligent buffering of outliers before model updates
+- **Cluster-Aware Querying**: Enhanced search with clustering context
+- **Real-time Processing**: Stream processing of new documents with immediate clustering
+- **Document Nodes**: Document nodes in knowledge graph with "belong-to" relations
+- **Map-Reduce Summaries**: LLM-powered cluster summaries using map-reduce approach
+
+## Architecture
 
 ```
-next_work/
-├── db/                          # Database implementations
-│   ├── __init__.py
-│   ├── json_doc_status_impl.py  # Document status tracking
-│   ├── json_kv_impl.py          # Key-value storage
-│   ├── nano_vector_db_impl.py   # Vector database
-│   └── networkx_impl.py         # Knowledge graph storage
-├── logger_config.py             # Logging configuration
-├── llm_client.py                # LLM clients (vLLM, OpenAI)
-├── embedding_client.py          # Embedding clients (Sentence Transformers, vLLM, OpenAI)
-├── llm_extractor.py             # Entity/relation extraction
-├── operators.py                 # Document and query operators
-├── graphrag_system.py           # Main system integration
-├── demo_graphrag.py             # Demo script
-├── utils.py                     # Utility functions
-└── requirements.txt             # Dependencies
+GraphRAG System
+├── Document Processing Layer
+│   ├── Chunking & Embedding
+│   ├── Entity/Relation Extraction
+│   └── Status Tracking
+├── Dynamic Clustering Layer
+│   ├── BERTopic Model Management
+│   ├── Outlier Detection & Buffering
+│   ├── Incremental Model Updates
+│   └── Cluster Summary Generation
+├── Storage Layer
+│   ├── Vector Databases (NanoVectorDB)
+│   ├── Knowledge Graph (NetworkX)
+│   └── Document Status (JSON)
+└── Query Layer
+    ├── Entity/Relation Search
+    ├── Graph Traversal
+    └── Cluster-Aware Retrieval
 ```
 
-## Cài đặt
+## Installation
 
-1. Clone repository:
+1. Clone the repository:
 
 ```bash
 git clone <repository-url>
 cd next_work
 ```
 
-2. Cài đặt dependencies:
+2. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. (Optional) Cài đặt CUDA support cho GPU acceleration:
+3. Set up environment variables:
 
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+export OPENAI_API_KEY="your-openai-api-key"
 ```
 
-## Sử dụng
+## Quick Start
 
-### 1. Khởi tạo hệ thống
+### Basic Usage
 
 ```python
 import asyncio
-from logger_config import setup_logger
-from graphrag_system import GraphRAGSystem
-from llm_client import create_llm_client
-from embedding_client import create_embedding_client
+from graphrag.clients.embedding_client import SentenceTransformersEmbeddingClient
+from graphrag.clients.llm_client import OpenAIClient
+from graphrag.core.graphrag_system import GraphRAGSystem
 
-# Setup logger
-logger = setup_logger(
-    name="GraphRAG",
-    log_level="INFO",
-    log_dir="./logs"
-)
+async def main():
+    # Initialize clients
+    embedding_client = SentenceTransformersEmbeddingClient(
+        model_name="BAAI/bge-m3",
+        global_config={"embedding_dimension": 768}
+    )
 
-# Tạo embedding client
-embedding_client = create_embedding_client(
-    client_type="sentence_transformers",
-    model_name="all-MiniLM-L6-v2",
-    device="cuda"  # hoặc "cpu"
-)
+    llm_client = OpenAIClient(
+        model_name="gpt-3.5-turbo",
+        api_key="your-api-key"
+    )
 
-# Tạo LLM client (optional)
-llm_client = create_llm_client(
-    client_type="vllm",
-    model_name="llama2-7b-chat",
-    url="http://localhost:8000/v1",
-    api_key="dummy"
-)
+    # Initialize GraphRAG system with clustering
+    clustering_config = {
+        "update_threshold": 5,
+        "min_cluster_size": 3,
+        "min_samples": 2,
+        "model_name": "dynamic_bertopic_model"
+    }
 
-# Khởi tạo hệ thống
-system = GraphRAGSystem(
-    working_dir="./graphrag_data",
+    graphrag = GraphRAGSystem(
+        working_dir="graphrag_data",
+        embedding_client=embedding_client,
+        global_config={"embedding_dimension": 768},
+        llm_client=llm_client,
+        enable_clustering=True,
+        clustering_config=clustering_config
+    )
+
+    # Initialize clustering with initial documents
+    initial_docs = [
+        "Python is a popular programming language.",
+        "Machine learning requires data preprocessing.",
+        "Football matches are exciting events."
+    ]
+    await graphrag.initialize_clustering(initial_docs)
+
+    # Process documents
+    documents = [
+        "Deep learning models need large datasets.",
+        "The championship final was intense.",
+        "Vietnamese pho is delicious traditional food."
+    ]
+
+    results = await graphrag.insert_documents_batch_with_llm(
+        documents=documents,
+        max_concurrent_docs=3
+    )
+
+    # Perform clustering analysis
+    clustering_results = await graphrag.process_clustering(documents)
+    print("Clustering results:", clustering_results)
+
+    # Generate cluster summaries
+    summary_results = await graphrag.generate_cluster_summaries()
+    print("Summary results:", summary_results)
+
+    # Query with clustering awareness
+    query_result = await graphrag.query_with_clustering(
+        "machine learning algorithms",
+        top_k=10,
+        use_clusters=True
+    )
+
+    print(query_result)
+
+asyncio.run(main())
+```
+
+### Clustering Configuration
+
+```python
+# Advanced clustering configuration
+clustering_config = {
+    "update_threshold": 5,        # Update model when 5 outliers collected
+    "min_cluster_size": 3,        # Minimum documents per cluster
+    "min_samples": 2,             # HDBSCAN min_samples parameter
+    "model_name": "dynamic_bertopic_model",
+    "max_tokens_per_batch": 4000, # For summary generation
+    "max_concurrent_batches": 3   # For summary generation
+}
+
+graphrag = GraphRAGSystem(
+    working_dir="graphrag_data",
     embedding_client=embedding_client,
-    global_config={"save_interval": 100},
-    llm_client=llm_client
+    global_config=global_config,
+    llm_client=llm_client,
+    enable_clustering=True,
+    clustering_config=clustering_config
 )
 ```
 
-### 2. Insert documents
+## How Clustering Works
+
+### 1. Initial Model Training
+
+- System trains BERTopic model on initial set of documents
+- Creates base clusters for known topics
+- Saves model for future use
+
+### 2. Document Processing
+
+- Each new document is processed through the clustering pipeline
+- System predicts topic assignment using existing model
+- Documents with high confidence are assigned to existing clusters
+- Low-confidence documents are marked as outliers and buffered
+
+### 3. Dynamic Updates
+
+- When outlier buffer reaches threshold, model is updated
+- New clusters are created from accumulated outliers
+- Model is saved with new knowledge
+- Buffer is cleared for next cycle
+
+### 4. Document Graph Integration
+
+- Document nodes are added to knowledge graph with type "Doc"
+- Entity nodes have type "Entity"
+- "belong-to" relations connect entities to their source documents
+- These relations are not saved in vector DB (only in graph)
+
+### 5. Cluster Summary Generation
+
+- Uses map-reduce approach to handle large document sets
+- Splits documents into batches within token limits
+- Processes batches in parallel with LLM
+- Combines batch summaries into final cluster summary
+
+### 6. Enhanced Querying
+
+- Queries can include clustering context
+- System finds similar clusters to query
+- Results include cluster information and keywords
+- Enables topic-aware document retrieval
+
+## API Reference
+
+### Core Methods
+
+#### Document Processing
+
+- `insert_document(doc_id, content, chunk_size=1000)`: Process single document
+- `insert_document_with_llm(doc_id, content)`: Process with LLM extraction and clustering
+- `insert_documents_batch(documents, chunk_size=1000, max_concurrent_docs=5)`: Batch processing
+- `insert_documents_batch_with_llm(documents, max_concurrent_docs=5)`: Batch with LLM and clustering
+
+#### Clustering
+
+- `initialize_clustering(initial_docs)`: Initialize clustering model
+- `process_clustering(documents)`: Process documents through clustering pipeline
+- `generate_cluster_summaries()`: Generate summaries for all clusters
+- `get_documents_by_cluster(cluster_id)`: Get documents in specific cluster
+- `get_clustering_statistics()`: Get clustering performance metrics
+- `force_cluster_update()`: Force model update
+- `query_with_clustering(query, top_k=10, use_clusters=True)`: Enhanced querying
+
+#### Querying
+
+- `query_entities(query, top_k=10)`: Search entities
+- `query_relations(query, top_k=10)`: Search relations
+- `get_entity_neighbors(entity_name)`: Get entity neighbors in graph
+- `get_entity_graph_context(entity_name, max_depth=2)`: Get entity context
+
+### Clustering Classes
+
+#### DynamicClusteringManager
 
 ```python
-# Insert với LLM extraction (one-shot)
-success = await system.insert_document_with_llm(
-    doc_id="doc1",
-    content="Apple Inc. is a technology company that designs and manufactures consumer electronics..."
+from graphrag.core.clustering_manager import DynamicClusteringManager
+
+# Initialize clustering manager
+clustering_manager = DynamicClusteringManager(
+    embedding_client=embedding_client,
+    working_dir="data",
+    update_threshold=10,
+    min_cluster_size=5,
+    min_samples=2
 )
 
-# Hoặc insert với chunking
-success = await system.insert_document(
-    doc_id="doc2",
-    content="Microsoft Corporation is a multinational technology company...",
-    chunk_size=1000
-)
+# Initialize model
+await clustering_manager.initialize_model(initial_docs)
 
-# Batch processing - xử lý nhiều documents song song
-documents_batch = [
-    "Apple Inc. is a technology company that designs and manufactures consumer electronics...",
-    "Microsoft Corporation is a multinational technology company...",
-    "Google LLC is a technology company that specializes in internet-related services..."
-]
-
-# Batch processing với LLM one-shot
-results = await system.insert_documents_batch_with_llm(
-    documents=documents_batch,
-    max_concurrent_docs=5  # Chạy song song tối đa 5 documents
-)
-
-# Batch processing với chunking
-results = await system.insert_documents_batch(
-    documents=documents_batch,
-    chunk_size=1000,
-    max_concurrent_docs=5  # Chạy song song tối đa 5 documents
-)
+# Process document
+result = await clustering_manager.process_document("doc_1", "document content")
 ```
 
-### 3. Query dữ liệu
+#### ClusterSummaryGenerator
 
 ```python
-# Query entities
-entities = await system.query_entities("technology company", top_k=10)
+from graphrag.core.cluster_summary_generator import ClusterSummaryGenerator
 
-# Query relations
-relations = await system.query_relations("founded", top_k=10)
+# Initialize summary generator
+summary_generator = ClusterSummaryGenerator(
+    llm_client=llm_client,
+    max_tokens_per_batch=4000,
+    max_concurrent_batches=3
+)
 
-# Search entities by name
-apple_entities = await system.search_entities_by_name("Apple")
-
-# Get entity graph context
-context = await system.get_entity_graph_context("Apple")
-
-# Get system statistics
-stats = await system.get_system_stats()
-```
-
-### 4. Cleanup
-
-```python
-await system.cleanup()
-```
-
-## Cấu hình
-
-### LLM Clients
-
-#### vLLM Client (Self-hosted)
-
-```python
-llm_client = create_llm_client(
-    client_type="vllm",
-    model_name="llama2-7b-chat",
-    url="http://localhost:8000/v1",
-    api_key="dummy",
-    max_retries=3,
-    timeout=30
+# Generate summaries
+summaries = await summary_generator.generate_cluster_summaries(
+    cluster_documents=cluster_docs,
+    cluster_keywords=cluster_keywords
 )
 ```
 
-#### OpenAI Client
+## Examples
 
-```python
-llm_client = create_llm_client(
-    client_type="openai",
-    model_name="gpt-3.5-turbo",
-    api_key="your-api-key",
-    organization="your-org-id",  # optional
-    max_retries=3,
-    timeout=30
-)
-```
+### Complete Demo
 
-### Embedding Clients
-
-#### Sentence Transformers (GPU acceleration)
-
-```python
-embedding_client = create_embedding_client(
-    client_type="sentence_transformers",
-    model_name="all-MiniLM-L6-v2",  # hoặc "all-mpnet-base-v2"
-    device="cuda",  # hoặc "cpu"
-    max_retries=3
-)
-```
-
-#### vLLM Embedding
-
-```python
-embedding_client = create_embedding_client(
-    client_type="vllm",
-    model_name="llama2-7b-chat",
-    url="http://localhost:8000/v1",
-    api_key="dummy",
-    max_retries=3,
-    timeout=30
-)
-```
-
-#### OpenAI Embedding
-
-```python
-embedding_client = create_embedding_client(
-    client_type="openai",
-    model_name="text-embedding-ada-002",
-    api_key="your-api-key",
-    organization="your-org-id",  # optional
-    max_retries=3,
-    timeout=30
-)
-```
-
-### Logger Configuration
-
-```python
-logger = setup_logger(
-    name="GraphRAG",
-    log_level="INFO",  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    log_dir="./logs",
-    log_file="graphrag.log"  # optional
-)
-```
-
-## Demo
-
-Chạy demo để xem hệ thống hoạt động:
+Run the comprehensive clustering demo:
 
 ```bash
-python demo_graphrag.py
+python examples/demo_clustering_integration.py
 ```
 
-Demo sẽ:
+This demo shows:
 
-1. Khởi tạo hệ thống với LLM và embedding clients
-2. Insert sample documents
-3. Thực hiện các query examples
-4. Hiển thị system statistics
-5. Cleanup resources
+- Document insertion with LLM extraction
+- Dynamic clustering with outlier detection
+- Cluster summary generation
+- Clustering-aware querying
+- Document retrieval by cluster
 
-## Tính năng nâng cao
+### CLI Usage
 
-### Document Status Tracking
+```bash
+# Basic document insertion
+python -m graphrag.cli insert --documents doc1.txt doc2.txt
 
-- Tracking trạng thái: pending, success, failed
-- Lưu metadata: entities count, relations count, processing time
-- Error tracking và retry logic
+# With clustering
+python -m graphrag.cli insert --documents doc1.txt doc2.txt --enable-clustering
 
-### Entity/Relation Extraction
+# Query with clustering
+python -m graphrag.cli query "machine learning" --use-clusters
 
-- One-shot LLM extraction cho toàn bộ document
-- Chunk-based extraction với parallel processing
-- Format validation và error handling
-- Fallback to regex nếu không có LLM client
+# Generate summaries
+python -m graphrag.cli summarize --clusters
+```
 
-### Knowledge Graph
+## Performance Considerations
 
-- Merge entities với cùng normalized name
-- Combine descriptions và chunk sources
-- Store relations as edges với metadata
-- Graph traversal và context retrieval
+### Clustering Performance
 
-### Vector Database
+- **Model Updates**: Triggered by outlier threshold (default: 10)
+- **Batch Processing**: Documents processed concurrently with semaphore limits
+- **Memory Usage**: BERTopic models can be memory-intensive for large document sets
+- **Embedding Caching**: Embeddings are cached to avoid recomputation
 
-- Semantic search cho entities và relations
-- Metadata filtering và retrieval
-- Batch processing và optimization
-- Hash prefixing cho key management
+### Summary Generation
 
-## Performance
+- **Map-Reduce**: Handles large document sets efficiently
+- **Token Limits**: Configurable batch sizes to stay within LLM limits
+- **Parallel Processing**: Multiple batches processed concurrently
+- **Error Handling**: Graceful degradation if LLM calls fail
 
-- **Async Processing**: Multi-threaded LLM calls và embedding
-- **Batch Operations**: Batch embedding và database operations
-- **Parallel Document Processing**: Multiple documents processed concurrently
-- **Parallel Chunk Processing**: Chunks within each document processed in parallel
-- **GPU Acceleration**: Support cho CUDA với Sentence Transformers
-- **Memory Management**: Efficient data structures và cleanup
-- **Concurrency Control**: Configurable limits for concurrent processing
+### Storage
+
+- **Model Persistence**: BERTopic models saved to disk
+- **Graph Structure**: Document nodes and relations stored in NetworkX
+- **Vector Storage**: Chunks, entities, and relations in vector DB
+- **Status Tracking**: Document processing status in JSON storage
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **CUDA out of memory**: Giảm batch size hoặc sử dụng CPU
-2. **LLM timeout**: Tăng timeout hoặc giảm max_tokens
-3. **Embedding errors**: Check model name và device configuration
-4. **Database errors**: Verify working directory permissions
+1. **Out of Memory**: Reduce batch sizes or use smaller embedding models
+2. **Slow Clustering**: Adjust update threshold or use GPU acceleration
+3. **LLM Errors**: Check API keys and rate limits
+4. **Model Loading**: Ensure BERTopic model files are accessible
 
-### Logging
+### Debug Mode
 
-System sử dụng comprehensive logging:
+Enable debug logging:
 
-- Console output cho real-time monitoring
-- File logging cho debugging và analysis
-- Different log levels cho different use cases
-- Error tracking với stack traces
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
 
 ## Contributing
 
-1. Fork repository
-2. Create feature branch
-3. Add tests cho new features
-4. Update documentation
-5. Submit pull request
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
 
 ## License
 
-MIT License
-
-Examples:
-
-# Run demo
-
-graphrag demo
-
-# Process a document
-
-graphrag process --input document.txt --output ./data
-
-# Process multiple documents in batch (parallel)
-
-graphrag process --input ./documents/ --output ./data --batch --max-concurrent 5
-
-# Query entities
-
-graphrag query --entities "Apple Inc" --data ./data
+This project is licensed under the MIT License - see the LICENSE file for details.
