@@ -1,6 +1,6 @@
 import hashlib
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 from dataclasses import dataclass
 import os
 import json
@@ -25,8 +25,30 @@ class Relation:
 
 
 @dataclass
+class Document:
+    """Document data structure"""
+    doc_id: str
+    content: str
+    chunk_ids: List[str]
+    entity_ids: List[str]
+    relation_ids: List[str]
+
+
+@dataclass
+class ClusterInfo:
+    """Cluster information structure"""
+    cluster_id: int
+    doc_hash_ids: List[str]
+    outlier_doc_hash_ids: List[str]
+    summary: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class Chunk:
     """Chunk data structure"""
+    chunk_id: str
     content: str
     doc_id: str
 

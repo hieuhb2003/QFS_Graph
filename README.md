@@ -1,6 +1,6 @@
 # GraphRAG System
 
-Hệ thống GraphRAG tích hợp với NetworkX và Vector Database để xử lý documents, extract entities và relations, và xây dựng knowledge graph.
+Hệ thống GraphRAG tích hợp với NetworkX và Vector Database để xử lý documents, extract entities và relations, và xây dựng knowledge graph, và thực hiện clustering động.
 
 ## Tính năng chính
 
@@ -9,6 +9,9 @@ Hệ thống GraphRAG tích hợp với NetworkX và Vector Database để xử 
 - **Embedding Support**: Nhiều embedding clients (Sentence Transformers, vLLM, OpenAI)
 - **Vector Database**: Lưu trữ entities và relations với semantic search
 - **Knowledge Graph**: Xây dựng graph với NetworkX, merge entities, track relations
+- **Dynamic Clustering**: Incremental clustering với BERTopic + UMAP + HDBSCAN
+- **Cluster Summaries**: LLM-based summaries với map-reduce cho từng cluster
+- **Document Nodes**: Thêm document nodes vào graph với belong_to relations
 - **Logging System**: Comprehensive logging với file và console output
 - **Async Processing**: Multi-threaded processing cho performance tốt
 
@@ -152,7 +155,44 @@ context = await system.get_entity_graph_context("Apple")
 stats = await system.get_system_stats()
 ```
 
-### 4. Cleanup
+### 4. Clustering và Summaries
+
+```python
+# Thực hiện clustering cho tất cả documents đã xử lý
+clustering_result = await system.cluster_documents(outlier_threshold=10)
+
+# Lấy thông tin clusters
+cluster_info = await system.get_cluster_info()
+print(f"Total clusters: {cluster_info['total_clusters']}")
+print(f"Outlier documents: {cluster_info['outlier_documents']}")
+
+# Lấy documents theo cluster
+cluster_0_docs = await system.get_documents_by_cluster(0)
+print(f"Documents in cluster 0: {len(cluster_0_docs)}")
+
+# Tạo summaries cho tất cả clusters
+summaries = await system.generate_cluster_summaries(max_workers=4)
+for cluster_id, summary in summaries.items():
+    print(f"Cluster {cluster_id}: {summary[:100]}...")
+
+# Query cluster summaries
+query_results = await system.query_cluster_summaries("machine learning", top_k=3)
+for result in query_results:
+    print(f"Cluster {result['cluster_id']}: {result['summary'][:100]}...")
+
+# Cập nhật clusters với documents mới
+new_documents = [
+    "Neural networks are computational models inspired by biological neural networks...",
+    "Convolutional neural networks are specialized for processing grid-like data..."
+]
+update_result = await system.update_clusters_with_new_data(new_documents)
+
+# Lấy documents cùng cluster
+same_cluster_docs = await system.get_documents_with_same_cluster("doc-abc123")
+print(f"Documents in same cluster: {len(same_cluster_docs)}")
+```
+
+### 5. Cleanup
 
 ```python
 await system.cleanup()

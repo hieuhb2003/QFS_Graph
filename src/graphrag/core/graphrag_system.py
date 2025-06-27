@@ -11,12 +11,16 @@ from ..db.nano_vector_db_impl import NanoVectorDBStorage
 from ..db.networkx_impl import NetworkXStorage
 from .llm_extractor import LLMExtractor
 from .operators import DocumentOperator, QueryOperator
+from .clustering_manager import ClusteringManager
+from .cluster_summary_generator import ClusterSummaryGenerator
 from ..utils.utils import (
     compute_hash_with_prefix, 
     create_chunks, 
     normalize_entity_name,
     Entity,
-    Relation
+    Relation,
+    Document,
+    ClusterInfo
 )
 from ..clients.llm_client import BaseLLMClient
 from ..clients.embedding_client import BaseEmbeddingClient
@@ -78,6 +82,14 @@ class GraphRAGSystem:
             meta_fields=["source_entity", "relation_description", "target_entity", "chunk_id", "doc_id"]
         )
         
+        # Thêm cluster summary VDB riêng biệt
+        self._cluster_summary_db = NanoVectorDBStorage(
+            namespace="cluster_summaries",
+            embedding_func=self._embedding_wrapper,
+            global_config=global_config,
+            meta_fields=["cluster_id", "doc_hash_ids", "summary_text", "created_at"]
+        )
+        
         self._graph_db = NetworkXStorage(
             namespace="knowledge_graph",
             global_config=global_config
@@ -85,6 +97,26 @@ class GraphRAGSystem:
         
         # Khởi tạo LLM extractor
         self.llm_extractor = LLMExtractor(llm_client=llm_client, max_workers=4)
+        
+        # Khởi tạo clustering manager
+        clustering_config = global_config.get('clustering', {})
+        self.clustering_manager = ClusteringManager(
+            embedding_client=embedding_client,
+            outlier_threshold=clustering_config.get('outlier_threshold', 10),
+            max_tokens=clustering_config.get('max_tokens', 8192),
+            batch_size=clustering_config.get('batch_size', 16),
+            model_save_path=os.path.join(working_dir, "clustering_models")
+        )
+        
+        # Khởi tạo cluster summary generator
+        summary_config = global_config.get('summary', {})
+        self.cluster_summary_generator = ClusterSummaryGenerator(
+            llm_client=llm_client,
+            max_workers=summary_config.get('max_workers', 4),
+            context_length=summary_config.get('context_length', 4096),
+            summary_prompt_template=summary_config.get('summary_prompt_template'),
+            map_reduce_prompt_template=summary_config.get('map_reduce_prompt_template')
+        )
         
         # Khởi tạo operators
         self.doc_operator = DocumentOperator(
@@ -482,6 +514,7 @@ class GraphRAGSystem:
         await self._chunk_vdb.index_done_callback()
         await self._entity_db.index_done_callback()
         await self._relation_db.index_done_callback()
+        await self._cluster_summary_db.index_done_callback()
         await self._graph_db.index_done_callback()
         
         self.logger.info("All data saved successfully")
@@ -598,7 +631,54 @@ class GraphRAGSystem:
             
             await self._graph_db.upsert_edge(source_normalized, target_normalized, edge_data)
         
+        # Thêm document nodes và belong_to relations
+        await self._add_document_nodes_and_belong_relations(entities, relations)
+        
         self.logger.info(f"Updated graph with {len(entity_groups)} entities and {len(relations)} relations")
+
+    async def _add_document_nodes_and_belong_relations(self, entities: List[Entity], relations: List[Relation]):
+        """Thêm document nodes và belong_to relations"""
+        try:
+            # Lấy unique doc_ids từ entities và relations
+            doc_ids = set()
+            for entity in entities:
+                doc_ids.add(entity.doc_id)
+            for relation in relations:
+                doc_ids.add(relation.doc_id)
+            
+            # Thêm document nodes
+            for doc_id in doc_ids:
+                # Lấy document content từ doc_status_db
+                doc_status = await self._doc_status_db.get_by_id(doc_id)
+                if doc_status:
+                    content = doc_status.get("content", "")
+                    # Thêm document node (không lưu embedding)
+                    doc_node_data = {
+                        "doc_id": doc_id,
+                        "content": content[:200] + "..." if len(content) > 200 else content,  # Truncate
+                        "type": "document",
+                        "cluster_id": None  # Sẽ được cập nhật sau khi clustering
+                    }
+                    await self._graph_db.upsert_node(doc_id, doc_node_data)
+            
+            # Thêm belong_to relations từ entities đến documents
+            for entity in entities:
+                entity_normalized = normalize_entity_name(entity.entity_name)
+                doc_id = entity.doc_id
+                
+                # Thêm belong_to relation (không lưu vào vector DB)
+                edge_data = {
+                    "relation_type": "belong_to",
+                    "entity_name": entity.entity_name,
+                    "doc_id": doc_id,
+                    "chunk_id": entity.chunk_id
+                }
+                await self._graph_db.upsert_edge(entity_normalized, doc_id, edge_data)
+            
+            self.logger.info(f"Added {len(doc_ids)} document nodes and belong_to relations")
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi thêm document nodes và belong_to relations: {e}")
 
     # Query methods
     async def query_entities(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
@@ -672,6 +752,7 @@ class GraphRAGSystem:
         await self._chunk_vdb.index_done_callback()
         await self._entity_db.index_done_callback()
         await self._relation_db.index_done_callback()
+        await self._cluster_summary_db.index_done_callback()
         await self._graph_db.index_done_callback()
         
         self.logger.info("Cleanup completed successfully")
@@ -712,4 +793,318 @@ class GraphRAGSystem:
             
         except Exception as e:
             self.logger.error(f"Error getting system stats: {e}")
-            return {"error": str(e)} 
+            return {"error": str(e)}
+    
+    # Clustering methods
+    async def cluster_documents(self, outlier_threshold: int = 10) -> Dict[str, Any]:
+        """
+        Thực hiện clustering cho tất cả documents đã được xử lý
+        
+        Args:
+            outlier_threshold: Ngưỡng số lượng outlier để tạo cluster mới
+            
+        Returns:
+            Dict chứa thông tin clustering
+        """
+        try:
+            self.logger.info("Bắt đầu clustering documents...")
+            
+            # Lấy tất cả documents đã xử lý thành công
+            all_docs = await self._doc_status_db.get_all()
+            successful_docs = []
+            doc_hash_ids = []
+            
+            for doc_id, doc_info in all_docs.items():
+                if doc_info.get("status") == "success":
+                    content = doc_info.get("content", "")
+                    if content:
+                        successful_docs.append(content)
+                        doc_hash_ids.append(doc_id)
+            
+            if not successful_docs:
+                self.logger.warning("Không có documents nào để cluster")
+                return {"error": "Không có documents nào để cluster"}
+            
+            self.logger.info(f"Tìm thấy {len(successful_docs)} documents để cluster")
+            
+            # Thực hiện clustering
+            clustering_result = await self.clustering_manager.cluster_documents(successful_docs, doc_hash_ids)
+            
+            # Tạo cluster summaries
+            await self._generate_cluster_summaries(clustering_result)
+            
+            # Cập nhật graph với cluster information
+            await self._update_graph_with_clusters(clustering_result)
+            
+            self.logger.info("Hoàn thành clustering và tạo summaries")
+            return clustering_result
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi thực hiện clustering: {e}")
+            return {"error": str(e)}
+    
+    async def update_clusters_with_new_data(self, new_documents: List[str]) -> Dict[str, Any]:
+        """
+        Cập nhật clusters với documents mới
+        
+        Args:
+            new_documents: Danh sách documents mới
+            
+        Returns:
+            Dict chứa thông tin cập nhật
+        """
+        try:
+            self.logger.info(f"Cập nhật clusters với {len(new_documents)} documents mới...")
+            
+            # Tính doc_hash_ids cho documents mới
+            new_doc_hash_ids = []
+            for content in new_documents:
+                doc_hash_id = compute_hash_with_prefix(content, "doc-")
+                new_doc_hash_ids.append(doc_hash_id)
+            
+            # Cập nhật clusters
+            clustering_result = await self.clustering_manager.update_clusters_with_new_data(
+                new_documents, new_doc_hash_ids
+            )
+            
+            # Tạo cluster summaries mới
+            await self._generate_cluster_summaries(clustering_result)
+            
+            # Cập nhật graph với cluster information mới
+            await self._update_graph_with_clusters(clustering_result)
+            
+            self.logger.info("Hoàn thành cập nhật clusters")
+            return clustering_result
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi cập nhật clusters: {e}")
+            return {"error": str(e)}
+    
+    async def get_cluster_info(self) -> Dict[str, Any]:
+        """Lấy thông tin về clusters hiện tại"""
+        return await self.clustering_manager.get_cluster_info()
+    
+    async def get_documents_by_cluster(self, cluster_id: int) -> List[str]:
+        """Lấy hash doc IDs thuộc cluster cụ thể"""
+        return await self.clustering_manager.get_documents_by_cluster(cluster_id)
+    
+    async def get_cluster_doc_ids(self, cluster_id: int) -> List[str]:
+        """Lấy hash doc IDs của cluster"""
+        return await self.clustering_manager.get_cluster_doc_ids(cluster_id)
+    
+    async def generate_cluster_summaries(self, max_workers: int = 4) -> Dict[int, str]:
+        """
+        Tạo summaries cho tất cả clusters
+        
+        Args:
+            max_workers: Số worker tối đa cho parallel processing
+            
+        Returns:
+            Dict {cluster_id: summary}
+        """
+        try:
+            self.logger.info("Bắt đầu tạo cluster summaries...")
+            
+            # Lấy cluster documents
+            cluster_info = await self.clustering_manager.get_cluster_info()
+            cluster_documents = cluster_info.get("cluster_documents", {})
+            
+            # Lấy document contents
+            doc_content_map = await self._get_document_content_map()
+            
+            # Tạo summaries
+            summaries = await self.cluster_summary_generator.generate_cluster_summaries(
+                cluster_documents, doc_content_map
+            )
+            
+            # Lưu summaries vào cluster summary VDB
+            await self._save_cluster_summaries_to_vdb(summaries)
+            
+            # Lưu summaries vào clustering manager
+            for cluster_id, summary in summaries.items():
+                doc_hash_ids = cluster_documents.get(cluster_id, [])
+                await self.clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
+            
+            self.logger.info(f"Hoàn thành tạo summaries cho {len(summaries)} clusters")
+            return summaries
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi tạo cluster summaries: {e}")
+            return {"error": str(e)}
+    
+    async def query_cluster_summaries(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Query cluster summaries từ vector DB
+        
+        Args:
+            query: Query string
+            top_k: Số kết quả tối đa
+            
+        Returns:
+            List các cluster summaries phù hợp
+        """
+        try:
+            # Query từ cluster summary VDB
+            results = await self._cluster_summary_db.query(query, top_k)
+            
+            # Format kết quả
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "cluster_id": result.get("cluster_id"),
+                    "summary": result.get("summary_text"),
+                    "doc_hash_ids": result.get("doc_hash_ids", []),
+                    "score": result.get("score", 0.0)
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi query cluster summaries: {e}")
+            return []
+    
+    async def get_documents_with_same_cluster(self, doc_id: str) -> List[str]:
+        """
+        Lấy danh sách documents cùng cluster với document cho trước
+        
+        Args:
+            doc_id: Hash ID của document
+            
+        Returns:
+            List hash IDs của documents cùng cluster
+        """
+        try:
+            # Lấy cluster_id của document
+            cluster_assignments = await self.clustering_manager.get_cluster_info()
+            cluster_id = cluster_assignments.get("cluster_assignments", {}).get(doc_id)
+            
+            if cluster_id is None:
+                return []
+            
+            # Lấy tất cả documents cùng cluster
+            cluster_docs = await self.clustering_manager.get_documents_by_cluster(cluster_id)
+            
+            # Loại bỏ document hiện tại
+            cluster_docs = [doc for doc in cluster_docs if doc != doc_id]
+            
+            return cluster_docs
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi lấy documents cùng cluster: {e}")
+            return []
+    
+    # Helper methods for clustering
+    async def _generate_cluster_summaries(self, clustering_result: Dict[str, Any]) -> None:
+        """Tạo summaries cho clusters"""
+        try:
+            cluster_documents = clustering_result.get("cluster_documents", {})
+            doc_content_map = await self._get_document_content_map()
+            
+            summaries = await self.cluster_summary_generator.generate_cluster_summaries(
+                cluster_documents, doc_content_map
+            )
+            
+            # Lưu summaries
+            await self._save_cluster_summaries_to_vdb(summaries)
+            
+            # Lưu vào clustering manager
+            for cluster_id, summary in summaries.items():
+                doc_hash_ids = cluster_documents.get(cluster_id, [])
+                await self.clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
+                
+        except Exception as e:
+            self.logger.error(f"Lỗi khi tạo cluster summaries: {e}")
+    
+    async def _get_document_content_map(self) -> Dict[str, str]:
+        """Lấy map từ doc_hash_id sang content"""
+        try:
+            all_docs = await self._doc_status_db.get_all()
+            doc_content_map = {}
+            
+            for doc_id, doc_info in all_docs.items():
+                if doc_info.get("status") == "success":
+                    content = doc_info.get("content", "")
+                    if content:
+                        doc_content_map[doc_id] = content
+            
+            return doc_content_map
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi lấy document content map: {e}")
+            return {}
+    
+    async def _save_cluster_summaries_to_vdb(self, summaries: Dict[int, str]) -> None:
+        """Lưu cluster summaries vào vector DB"""
+        try:
+            summary_data = {}
+            
+            for cluster_id, summary in summaries.items():
+                summary_key = f"cluster_summary_{cluster_id}"
+                
+                # Lấy doc_hash_ids của cluster
+                doc_hash_ids = await self.clustering_manager.get_cluster_doc_ids(cluster_id)
+                
+                summary_data[summary_key] = {
+                    "content": summary,
+                    "cluster_id": cluster_id,
+                    "doc_hash_ids": doc_hash_ids,
+                    "summary_text": summary,
+                    "created_at": asyncio.get_event_loop().time()
+                }
+            
+            if summary_data:
+                await self._cluster_summary_db.upsert(summary_data)
+                self.logger.info(f"Đã lưu {len(summary_data)} cluster summaries vào VDB")
+                
+        except Exception as e:
+            self.logger.error(f"Lỗi khi lưu cluster summaries vào VDB: {e}")
+    
+    async def _update_graph_with_clusters(self, clustering_result: Dict[str, Any]) -> None:
+        """Cập nhật graph với thông tin clusters"""
+        try:
+            cluster_assignments = clustering_result.get("cluster_assignments", {})
+            cluster_documents = clustering_result.get("cluster_documents", {})
+            
+            # Thêm document nodes vào graph nếu chưa có
+            for doc_hash_id in cluster_assignments.keys():
+                doc_status = await self._doc_status_db.get_by_id(doc_hash_id)
+                if doc_status:
+                    # Thêm document node
+                    doc_node_data = {
+                        "doc_id": doc_hash_id,
+                        "content": doc_status.get("content", "")[:200] + "...",  # Truncate
+                        "cluster_id": cluster_assignments.get(doc_hash_id, -1),
+                        "type": "document"
+                    }
+                    await self._graph_db.upsert_node(doc_hash_id, doc_node_data)
+            
+            # Thêm "has_same_cluster" relations giữa documents cùng cluster
+            for cluster_id, doc_hash_ids in cluster_documents.items():
+                if cluster_id == -1:  # Bỏ qua outlier cluster
+                    continue
+                
+                # Tạo relations giữa tất cả documents trong cluster
+                for i, doc1 in enumerate(doc_hash_ids):
+                    for j, doc2 in enumerate(doc_hash_ids):
+                        if i < j:  # Tránh duplicate và self-relation
+                            edge_data = {
+                                "relation_type": "has_same_cluster",
+                                "cluster_id": cluster_id,
+                                "doc1": doc1,
+                                "doc2": doc2
+                            }
+                            await self._graph_db.upsert_edge(doc1, doc2, edge_data)
+            
+            self.logger.info("Đã cập nhật graph với thông tin clusters")
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi cập nhật graph với clusters: {e}")
+    
+    # Database access methods for clustering
+    @property
+    def cluster_summary_db(self):
+        return self._cluster_summary_db
+    
+    @property
+    def clustering_manager(self):
+        return self.clustering_manager 

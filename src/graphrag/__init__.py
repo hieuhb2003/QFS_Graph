@@ -1,6 +1,6 @@
 """
 GraphRAG System - A comprehensive system for building knowledge graphs from documents
-using LLM extraction, vector databases, and NetworkX graph processing.
+using LLM extraction, vector databases, NetworkX graph processing, and dynamic clustering.
 """
 
 __version__ = "0.1.0"
@@ -11,6 +11,8 @@ __email__ = "contact@graphrag.com"
 from .core.graphrag_system import GraphRAGSystem
 from .core.llm_extractor import LLMExtractor
 from .core.operators import DocumentOperator, QueryOperator
+from .core.clustering_manager import ClusteringManager
+from .core.cluster_summary_generator import ClusterSummaryGenerator
 
 # Client imports
 from .clients.llm_client import create_llm_client, BaseLLMClient, VLLMClient, OpenAIClient
@@ -26,7 +28,7 @@ from .db.nano_vector_db_impl import NanoVectorDBStorage
 from .db.networkx_impl import NetworkXStorage
 
 # Data structures
-from .utils.utils import Entity, Relation, Chunk
+from .utils.utils import Entity, Relation, Chunk, Document, ClusterInfo
 
 __all__ = [
     # Core
@@ -34,6 +36,8 @@ __all__ = [
     "LLMExtractor", 
     "DocumentOperator",
     "QueryOperator",
+    "ClusteringManager",
+    "ClusterSummaryGenerator",
     
     # Clients
     "create_llm_client",
@@ -61,4 +65,6 @@ __all__ = [
     "Entity",
     "Relation",
     "Chunk",
+    "Document",
+    "ClusterInfo",
 ] 
