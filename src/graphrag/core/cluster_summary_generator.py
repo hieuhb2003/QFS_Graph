@@ -5,7 +5,7 @@ Tạo summary cho clusters bằng LLM với map-reduce
 
 import asyncio
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional,Tuple
 from datetime import datetime
 import re
 
@@ -35,7 +35,7 @@ class ClusterSummaryGenerator:
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.context_length = context_length
-        self.logger = get_logger(__name__)
+        self.logger = get_logger()
         
         # Default prompt templates
         self.summary_prompt_template = summary_prompt_template or """
@@ -193,7 +193,7 @@ Comprehensive Summary:
             prompt = self.map_reduce_prompt_template.format(summaries=summaries_text)
             
             # Gọi LLM để tạo summary tổng hợp
-            response = await self.llm_client.generate_text(prompt)
+            response = await self.llm_client.generate(prompt)
             
             return response.strip()
             
@@ -250,7 +250,7 @@ Comprehensive Summary:
             prompt = self.summary_prompt_template.format(documents=documents_text)
             
             # Gọi LLM để tạo summary
-            response = await self.llm_client.generate_text(prompt)
+            response = await self.llm_client.generate(prompt)
             
             return response.strip()
             

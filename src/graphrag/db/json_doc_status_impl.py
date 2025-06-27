@@ -66,6 +66,10 @@ class JsonDocStatusStorage(DocStatusStorage):
     async def get_by_id(self, id: str) -> Union[dict[str, Any], None]:
         return self._data.get(id)
 
+    async def get_all(self) -> dict[str, dict[str, Any]]:
+        """Get all documents in storage"""
+        return self._data.copy()
+
     async def delete(self, doc_ids: list[str]):
         for doc_id in doc_ids:
             self._data.pop(doc_id, None)

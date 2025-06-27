@@ -87,6 +87,10 @@ graphrag_data/
 
 *.ipynb
 
+demo_full_workflow_data/
+
+demo_full_workflow_data/
+
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:

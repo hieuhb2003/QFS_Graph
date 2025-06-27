@@ -13,6 +13,34 @@ from src.graphrag.core.graphrag_system import GraphRAGSystem
 from src.graphrag.clients.llm_client import create_llm_client
 from src.graphrag.clients.embedding_client import create_embedding_client
 from src.graphrag.utils.logger_config import setup_logger
+from src.graphrag.utils.utils import ClusterInfo
+
+
+def serialize_cluster_info(obj):
+    """Helper function to serialize ClusterInfo objects and other complex types"""
+    if isinstance(obj, ClusterInfo):
+        return {
+            'cluster_id': obj.cluster_id,
+            'doc_hash_ids': obj.doc_hash_ids,
+            'outlier_doc_hash_ids': obj.outlier_doc_hash_ids,
+            'summary': obj.summary,
+            'created_at': obj.created_at,
+            'updated_at': obj.updated_at
+        }
+    # Handle other non-serializable objects by converting to string
+    elif hasattr(obj, '__dict__'):
+        return str(obj)
+    else:
+        return str(obj)
+
+
+def safe_json_dumps(data, indent=2):
+    """Safely serialize data to JSON, handling complex objects"""
+    try:
+        return json.dumps(data, indent=indent, default=serialize_cluster_info, ensure_ascii=False)
+    except Exception as e:
+        # Fallback to string representation
+        return str(data)
 
 
 async def demo_full_workflow():
@@ -47,6 +75,7 @@ async def demo_full_workflow():
     # Cấu hình hệ thống
     global_config = {
         "save_interval": 50,
+        "working_dir": "demo_full_workflow_data",
         "clustering": {
             "outlier_threshold": 5,
             "max_tokens": 4096,
@@ -55,6 +84,11 @@ async def demo_full_workflow():
         "summary": {
             "max_workers": 3,
             "context_length": 2048
+        },       
+          "embedding_batch_num": 32,
+        "embedding_dimension": 384,  # Dimension của all-MiniLM-L6-v2
+        "vector_db_storage_cls_kwargs": {
+            "cosine_better_than_threshold": 0.5
         }
     }
     
@@ -131,48 +165,48 @@ async def demo_full_workflow():
         
         # Lấy system stats
         stats = await system.get_system_stats()
-        logger.info(f"📊 System stats: {json.dumps(stats, indent=2)}")
+        logger.info(f"📊 System stats: {safe_json_dumps(stats)}")
         
-        # ========================================
-        # PHASE 2: ENTITY & RELATION QUERYING
-        # ========================================
-        logger.info("\n" + "="*60)
-        logger.info("🔍 PHASE 2: ENTITY & RELATION QUERYING")
-        logger.info("="*60)
+        # # ========================================
+        # # PHASE 2: ENTITY & RELATION QUERYING
+        # # ========================================
+        # logger.info("\n" + "="*60)
+        # logger.info("🔍 PHASE 2: ENTITY & RELATION QUERYING")
+        # logger.info("="*60)
         
-        # Query entities
-        logger.info("🔍 Querying entities...")
-        entity_queries = ["technology company", "artificial intelligence", "machine learning"]
-        for query in entity_queries:
-            entities = await system.query_entities(query, top_k=3)
-            logger.info(f"  Query '{query}': {len(entities)} entities found")
-            for i, entity in enumerate(entities):
-                logger.info(f"    {i+1}. {entity.get('entity_name', 'N/A')}: {entity.get('description', 'N/A')[:100]}...")
+        # # Query entities
+        # logger.info("🔍 Querying entities...")
+        # entity_queries = ["technology company", "artificial intelligence", "machine learning"]
+        # for query in entity_queries:
+        #     entities = await system.query_entities(query, top_k=3)
+        #     logger.info(f"  Query '{query}': {len(entities)} entities found")
+        #     for i, entity in enumerate(entities):
+        #         logger.info(f"    {i+1}. {entity.get('entity_name', 'N/A')}: {entity.get('description', 'N/A')[:100]}...")
         
-        # Query relations
-        logger.info("🔗 Querying relations...")
-        relation_queries = ["founded", "develops", "specializes in"]
-        for query in relation_queries:
-            relations = await system.query_relations(query, top_k=3)
-            logger.info(f"  Query '{query}': {len(relations)} relations found")
-            for i, relation in enumerate(relations):
-                logger.info(f"    {i+1}. {relation.get('source_entity', 'N/A')} -> {relation.get('relation_description', 'N/A')} -> {relation.get('target_entity', 'N/A')}")
+        # # Query relations
+        # logger.info("🔗 Querying relations...")
+        # relation_queries = ["founded", "develops", "specializes in"]
+        # for query in relation_queries:
+        #     relations = await system.query_relations(query, top_k=3)
+        #     logger.info(f"  Query '{query}': {len(relations)} relations found")
+        #     for i, relation in enumerate(relations):
+        #         logger.info(f"    {i+1}. {relation.get('source_entity', 'N/A')} -> {relation.get('relation_description', 'N/A')} -> {relation.get('target_entity', 'N/A')}")
         
-        # Search entities by name
-        logger.info("🔍 Searching entities by name...")
-        entity_names = ["Apple", "Microsoft", "Google", "Tesla"]
-        for name in entity_names:
-            results = await system.search_entities_by_name(name)
-            logger.info(f"  Search '{name}': {len(results)} entities found")
-            for i, result in enumerate(results):
-                logger.info(f"    {i+1}. {result.get('entity_name', 'N/A')}: {result.get('description', 'N/A')[:100]}...")
+        # # Search entities by name
+        # logger.info("🔍 Searching entities by name...")
+        # entity_names = ["Apple", "Microsoft", "Google", "Tesla"]
+        # for name in entity_names:
+        #     results = await system.search_entities_by_name(name)
+        #     logger.info(f"  Search '{name}': {len(results)} entities found")
+        #     for i, result in enumerate(results):
+        #         logger.info(f"    {i+1}. {result.get('entity_name', 'N/A')}: {result.get('description', 'N/A')[:100]}...")
         
-        # Get entity graph context
-        logger.info("🕸️ Getting entity graph context...")
-        context_entities = ["Apple", "technology"]
-        for entity_name in context_entities:
-            context = await system.get_entity_graph_context(entity_name, max_depth=2)
-            logger.info(f"  Context for '{entity_name}': {len(context.get('neighbors', []))} neighbors")
+        # # Get entity graph context
+        # logger.info("🕸️ Getting entity graph context...")
+        # context_entities = ["Apple", "technology"]
+        # for entity_name in context_entities:
+        #     context = await system.get_entity_graph_context(entity_name, max_depth=2)
+        #     logger.info(f"  Context for '{entity_name}': {len(context.get('neighbors', []))} neighbors")
         
         # ========================================
         # PHASE 3: CLUSTERING
@@ -197,7 +231,7 @@ async def demo_full_workflow():
         
         # Lấy cluster info chi tiết
         cluster_info = await system.get_cluster_info()
-        logger.info(f"📋 Cluster info: {json.dumps(cluster_info, indent=2)}")
+        logger.info(f"📋 Cluster info: {safe_json_dumps(cluster_info)}")
         
         # Hiển thị documents theo cluster
         logger.info("📋 Documents theo cluster:")
@@ -272,7 +306,7 @@ async def demo_full_workflow():
         # Update clusters với data mới
         logger.info("🔄 Updating clusters với documents mới...")
         update_result = await system.update_clusters_with_new_data(new_documents)
-        logger.info(f"✅ Updated clusters: {json.dumps(update_result, indent=2)}")
+        logger.info(f"✅ Updated clusters: {safe_json_dumps(update_result)}")
         
         # ========================================
         # PHASE 6: GRAPH ANALYSIS
