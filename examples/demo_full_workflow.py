@@ -56,44 +56,51 @@ async def demo_full_workflow():
     # Embedding client
     embedding_client = create_embedding_client(
         client_type="sentence_transformers",
-        model_name="all-MiniLM-L6-v2",
-        device="cpu"
+        model_name="BAAI/bge-m3",
+        device="cuda:0"
     )
     
     # LLM client (có thể dùng OpenAI hoặc vLLM)
-    llm_client = None
-    if os.getenv("OPENAI_API_KEY"):
-        llm_client = create_llm_client(
-            client_type="openai",
-            model_name="gpt-3.5-turbo",
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        logger.info("✅ Sử dụng OpenAI LLM client")
-    else:
-        logger.warning("⚠️ Không có OpenAI API key, sẽ bỏ qua LLM extraction")
-    
+    # llm_client = None
+    # if os.getenv("OPENAI_API_KEY"):
+    #     llm_client = create_llm_client(
+    #         client_type="openai",
+    #         model_name="gpt-3.5-turbo",
+    #         api_key=os.getenv("OPENAI_API_KEY")
+    #     )
+    #     logger.info("✅ Sử dụng OpenAI LLM client")
+    # else:
+    #     logger.warning("⚠️ Không có OpenAI API key, sẽ bỏ qua LLM extraction")
+    llm_client = create_llm_client(
+        client_type="vllm",
+        model_name="qwen2.5-7b-it-gpu0",
+        url ="http://localhost:9100/v1",
+        api_key='0'
+    )
+    logger.info("✅ Sử dụng vLLM LLM client")
     # Cấu hình hệ thống
     global_config = {
+        
         "save_interval": 50,
-        "working_dir": "demo_full_workflow_data",
+        "working_dir": "/home/hungpv/projects/next_work/our_method_data1_graph",
         "clustering": {
-            "outlier_threshold": 5,
+            "outlier_threshold": 10,
             "max_tokens": 4096,
             "batch_size": 8
         },
         "summary": {
-            "max_workers": 3,
-            "context_length": 2048
+            "max_workers": 5,
+            "context_length": 60000
         },       
           "embedding_batch_num": 32,
-        "embedding_dimension": 384,  # Dimension của all-MiniLM-L6-v2
+        "embedding_dimension": 1024,  # Dimension của all-MiniLM-L6-v2
         "vector_db_storage_cls_kwargs": {
             "cosine_better_than_threshold": 0.5
         }
     }
     
     # Khởi tạo GraphRAG system
-    working_dir = "demo_full_workflow_data"
+    working_dir = "/home/hungpv/projects/next_work/our_method_data1_graph"
     system = GraphRAGSystem(
         working_dir=working_dir,
         embedding_client=embedding_client,
@@ -109,56 +116,59 @@ async def demo_full_workflow():
         logger.info("📄 PHASE 1: DOCUMENT PROCESSING")
         logger.info("="*60)
         
+        with open("/home/hungpv/projects/next_work/data/data_1/data1_to_index.json", "r") as f:
+            documents = json.load(f)
         # Dữ liệu mẫu đa dạng
-        documents = [
-            # AI/ML Documents
-            "Apple Inc. is a technology company that designs and manufactures consumer electronics, computer software, and online services. Founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in 1976, Apple has become one of the world's most valuable companies. The company is known for its innovative products like the iPhone, iPad, Mac, and Apple Watch.",
+        # documents = [
+        #     # AI/ML Documents
+        #     "Apple Inc. is a technology company that designs and manufactures consumer electronics, computer software, and online services. Founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in 1976, Apple has become one of the world's most valuable companies. The company is known for its innovative products like the iPhone, iPad, Mac, and Apple Watch.",
             
-            "Microsoft Corporation is a multinational technology company that develops, manufactures, licenses, supports, and sells computer software, consumer electronics, personal computers, and related services. Founded by Bill Gates and Paul Allen in 1975, Microsoft is best known for its Windows operating system and Office productivity suite.",
+        #     "Microsoft Corporation is a multinational technology company that develops, manufactures, licenses, supports, and sells computer software, consumer electronics, personal computers, and related services. Founded by Bill Gates and Paul Allen in 1975, Microsoft is best known for its Windows operating system and Office productivity suite.",
             
-            "Google LLC is a technology company that specializes in internet-related services and products, which include online advertising technologies, search engine, cloud computing, software, and hardware. Founded by Larry Page and Sergey Brin in 1998, Google has become synonymous with web search and digital innovation.",
+        #     "Google LLC is a technology company that specializes in internet-related services and products, which include online advertising technologies, search engine, cloud computing, software, and hardware. Founded by Larry Page and Sergey Brin in 1998, Google has become synonymous with web search and digital innovation.",
             
-            "Machine learning is a subset of artificial intelligence that focuses on algorithms and statistical models to enable computers to improve their performance on a specific task through experience. It involves training models on data to make predictions or decisions without being explicitly programmed for the task.",
+        #     "Machine learning is a subset of artificial intelligence that focuses on algorithms and statistical models to enable computers to improve their performance on a specific task through experience. It involves training models on data to make predictions or decisions without being explicitly programmed for the task.",
             
-            "Deep learning is a subset of machine learning that uses artificial neural networks with multiple layers to model and understand complex patterns in data. It has been particularly successful in computer vision, natural language processing, and speech recognition tasks.",
+        #     "Deep learning is a subset of machine learning that uses artificial neural networks with multiple layers to model and understand complex patterns in data. It has been particularly successful in computer vision, natural language processing, and speech recognition tasks.",
             
-            "Natural Language Processing (NLP) is a field of artificial intelligence that focuses on the interaction between computers and human language. It involves developing algorithms and models to understand, interpret, and generate human language in a meaningful way.",
+        #     "Natural Language Processing (NLP) is a field of artificial intelligence that focuses on the interaction between computers and human language. It involves developing algorithms and models to understand, interpret, and generate human language in a meaningful way.",
             
-            "Computer Vision is a field of artificial intelligence that enables computers to interpret and understand visual information from the world. It involves developing algorithms to process, analyze, and extract meaningful information from images and videos.",
+        #     "Computer Vision is a field of artificial intelligence that enables computers to interpret and understand visual information from the world. It involves developing algorithms to process, analyze, and extract meaningful information from images and videos.",
             
-            "Reinforcement Learning is a type of machine learning where an agent learns to make decisions by taking actions in an environment to achieve maximum cumulative reward. It is inspired by how humans and animals learn through trial and error.",
+        #     "Reinforcement Learning is a type of machine learning where an agent learns to make decisions by taking actions in an environment to achieve maximum cumulative reward. It is inspired by how humans and animals learn through trial and error.",
             
-            # Business Documents
-            "Tesla Inc. is an electric vehicle and clean energy company founded by Elon Musk in 2003. The company designs, develops, manufactures, leases, and sells electric vehicles, energy generation and storage systems, and offers services related to its products.",
+        #     # Business Documents
+        #     "Tesla Inc. is an electric vehicle and clean energy company founded by Elon Musk in 2003. The company designs, develops, manufactures, leases, and sells electric vehicles, energy generation and storage systems, and offers services related to its products.",
             
-            "Amazon.com Inc. is an American multinational technology company that focuses on e-commerce, cloud computing, digital streaming, and artificial intelligence. Founded by Jeff Bezos in 1994, Amazon has grown to become one of the world's largest companies.",
+        #     "Amazon.com Inc. is an American multinational technology company that focuses on e-commerce, cloud computing, digital streaming, and artificial intelligence. Founded by Jeff Bezos in 1994, Amazon has grown to become one of the world's largest companies.",
             
-            "Netflix Inc. is a streaming service that offers a wide variety of award-winning TV shows, movies, anime, documentaries, and more on thousands of internet-connected devices. Founded by Reed Hastings and Marc Randolph in 1997.",
+        #     "Netflix Inc. is a streaming service that offers a wide variety of award-winning TV shows, movies, anime, documentaries, and more on thousands of internet-connected devices. Founded by Reed Hastings and Marc Randolph in 1997.",
             
-            # Science Documents
-            "Quantum computing is a type of computation that harnesses the collective properties of quantum states to perform calculations. It uses quantum mechanical phenomena such as superposition and entanglement to process information in ways that classical computers cannot.",
+        #     # Science Documents
+        #     "Quantum computing is a type of computation that harnesses the collective properties of quantum states to perform calculations. It uses quantum mechanical phenomena such as superposition and entanglement to process information in ways that classical computers cannot.",
             
-            "Climate change refers to long-term shifts in global or regional climate patterns. It is primarily caused by human activities, particularly the burning of fossil fuels, which increases heat-trapping greenhouse gas levels in Earth's atmosphere.",
+        #     "Climate change refers to long-term shifts in global or regional climate patterns. It is primarily caused by human activities, particularly the burning of fossil fuels, which increases heat-trapping greenhouse gas levels in Earth's atmosphere.",
             
-            "Renewable energy is energy that is collected from renewable resources, which are naturally replenished on a human timescale, such as sunlight, wind, rain, tides, waves, and geothermal heat. It is considered environmentally friendly and sustainable.",
+        #     "Renewable energy is energy that is collected from renewable resources, which are naturally replenished on a human timescale, such as sunlight, wind, rain, tides, waves, and geothermal heat. It is considered environmentally friendly and sustainable.",
             
-            # Outliers
-            "Cooking is the art, science, and craft of using heat to prepare food for consumption. It involves various techniques such as baking, frying, grilling, and boiling to transform raw ingredients into delicious meals.",
+        #     # Outliers
+        #     "Cooking is the art, science, and craft of using heat to prepare food for consumption. It involves various techniques such as baking, frying, grilling, and boiling to transform raw ingredients into delicious meals.",
             
-            "Travel involves moving from one place to another for various purposes such as leisure, business, or exploration. It provides opportunities to experience different cultures, landscapes, and perspectives.",
+        #     "Travel involves moving from one place to another for various purposes such as leisure, business, or exploration. It provides opportunities to experience different cultures, landscapes, and perspectives.",
             
-            "Fashion refers to the styles and trends in clothing, accessories, and personal appearance that are popular at a particular time and place. It is influenced by culture, society, and individual preferences."
-        ]
+        #     "Fashion refers to the styles and trends in clothing, accessories, and personal appearance that are popular at a particular time and place. It is influenced by culture, society, and individual preferences."
+        # ]
         
         logger.info(f"📝 Chuẩn bị {len(documents)} documents để xử lý...")
-        
+        import time
+        start_time = time.time()
         # Insert documents với LLM extraction (nếu có LLM)
         if llm_client:
             logger.info("🔍 Inserting documents với LLM extraction...")
             results = await system.insert_documents_batch_with_llm(documents, max_concurrent_docs=3)
         else:
             logger.info("📄 Inserting documents với chunking (không có LLM)...")
-            results = await system.insert_documents_batch(documents, chunk_size=500, max_concurrent_docs=3)
+            results = await system.insert_documents_batch(documents, chunk_size=4096, max_concurrent_docs=3)
         
         successful_inserts = sum(results)
         logger.info(f"✅ Successfully inserted {successful_inserts}/{len(documents)} documents")
@@ -272,74 +282,75 @@ async def demo_full_workflow():
                 logger.error(f"❌ Summary generation failed: {summaries['error']}")
         else:
             logger.warning("⚠️ Bỏ qua summary generation (không có LLM client)")
+        end_time = time.time()
         
-        # ========================================
-        # PHASE 5: INCREMENTAL CLUSTERING
-        # ========================================
-        logger.info("\n" + "="*60)
-        logger.info("🔄 PHASE 5: INCREMENTAL CLUSTERING")
-        logger.info("="*60)
+        # # ========================================
+        # # PHASE 5: INCREMENTAL CLUSTERING
+        # # ========================================
+        # logger.info("\n" + "="*60)
+        # logger.info("🔄 PHASE 5: INCREMENTAL CLUSTERING")
+        # logger.info("="*60)
         
-        # Thêm documents mới
-        new_documents = [
-            "Neural Networks are computational models inspired by biological neural networks. They consist of interconnected nodes (neurons) that process information and can learn complex patterns through training.",
+        # # Thêm documents mới
+        # new_documents = [
+        #     "Neural Networks are computational models inspired by biological neural networks. They consist of interconnected nodes (neurons) that process information and can learn complex patterns through training.",
             
-            "Convolutional Neural Networks (CNNs) are a specialized type of neural network designed for processing grid-like data such as images. They use convolutional layers to automatically learn spatial hierarchies of features.",
+        #     "Convolutional Neural Networks (CNNs) are a specialized type of neural network designed for processing grid-like data such as images. They use convolutional layers to automatically learn spatial hierarchies of features.",
             
-            "Transformers are a type of neural network architecture that has revolutionized natural language processing. They use self-attention mechanisms to process sequences of data and have achieved state-of-the-art results in many NLP tasks.",
+        #     "Transformers are a type of neural network architecture that has revolutionized natural language processing. They use self-attention mechanisms to process sequences of data and have achieved state-of-the-art results in many NLP tasks.",
             
-            "Meta Platforms Inc. (formerly Facebook) is a technology company that develops products and services for connecting people. Founded by Mark Zuckerberg in 2004, the company owns Facebook, Instagram, WhatsApp, and other social media platforms.",
+        #     "Meta Platforms Inc. (formerly Facebook) is a technology company that develops products and services for connecting people. Founded by Mark Zuckerberg in 2004, the company owns Facebook, Instagram, WhatsApp, and other social media platforms.",
             
-            "NVIDIA Corporation is a technology company that designs graphics processing units (GPUs) for gaming and professional markets, as well as system on a chip units (SoCs) for mobile computing and automotive markets."
-        ]
+        #     "NVIDIA Corporation is a technology company that designs graphics processing units (GPUs) for gaming and professional markets, as well as system on a chip units (SoCs) for mobile computing and automotive markets."
+        # ]
         
-        logger.info(f"📝 Thêm {len(new_documents)} documents mới...")
+        # logger.info(f"📝 Thêm {len(new_documents)} documents mới...")
         
-        # Insert documents mới
-        if llm_client:
-            new_results = await system.insert_documents_batch_with_llm(new_documents, max_concurrent_docs=2)
-        else:
-            new_results = await system.insert_documents_batch(new_documents, chunk_size=500, max_concurrent_docs=2)
+        # # Insert documents mới
+        # if llm_client:
+        #     new_results = await system.insert_documents_batch_with_llm(new_documents, max_concurrent_docs=2)
+        # else:
+        #     new_results = await system.insert_documents_batch(new_documents, chunk_size=500, max_concurrent_docs=2)
         
-        logger.info(f"✅ Inserted {sum(new_results)}/{len(new_documents)} new documents")
+        # logger.info(f"✅ Inserted {sum(new_results)}/{len(new_documents)} new documents")
         
-        # Update clusters với data mới
-        logger.info("🔄 Updating clusters với documents mới...")
-        update_result = await system.update_clusters_with_new_data(new_documents)
-        logger.info(f"✅ Updated clusters: {safe_json_dumps(update_result)}")
+        # # Update clusters với data mới
+        # logger.info("🔄 Updating clusters với documents mới...")
+        # update_result = await system.update_clusters_with_new_data(new_documents)
+        # logger.info(f"✅ Updated clusters: {safe_json_dumps(update_result)}")
         
-        # ========================================
-        # PHASE 6: GRAPH ANALYSIS
-        # ========================================
-        logger.info("\n" + "="*60)
-        logger.info("🕸️ PHASE 6: GRAPH ANALYSIS")
-        logger.info("="*60)
+        # # ========================================
+        # # PHASE 6: GRAPH ANALYSIS
+        # # ========================================
+        # logger.info("\n" + "="*60)
+        # logger.info("🕸️ PHASE 6: GRAPH ANALYSIS")
+        # logger.info("="*60)
         
-        # Lấy documents cùng cluster
-        logger.info("🔗 Finding documents in same cluster...")
-        all_docs = await system.doc_status_db.get_all()
-        first_doc_id = None
-        for doc_id, doc_info in all_docs.items():
-            if doc_info.get("status") == "success":
-                first_doc_id = doc_id
-                break
+        # # Lấy documents cùng cluster
+        # logger.info("🔗 Finding documents in same cluster...")
+        # all_docs = await system.doc_status_db.get_all()
+        # first_doc_id = None
+        # for doc_id, doc_info in all_docs.items():
+        #     if doc_info.get("status") == "success":
+        #         first_doc_id = doc_id
+        #         break
         
-        if first_doc_id:
-            same_cluster_docs = await system.get_documents_with_same_cluster(first_doc_id)
-            logger.info(f"📋 Documents cùng cluster với {first_doc_id}: {len(same_cluster_docs)} documents")
-            for i, doc_id in enumerate(same_cluster_docs[:5]):  # Chỉ hiển thị 5 docs đầu
-                logger.info(f"  {i+1}. {doc_id}")
-            if len(same_cluster_docs) > 5:
-                logger.info(f"  ... và {len(same_cluster_docs) - 5} documents khác")
+        # if first_doc_id:
+        #     same_cluster_docs = await system.get_documents_with_same_cluster(first_doc_id)
+        #     logger.info(f"📋 Documents cùng cluster với {first_doc_id}: {len(same_cluster_docs)} documents")
+        #     for i, doc_id in enumerate(same_cluster_docs[:5]):  # Chỉ hiển thị 5 docs đầu
+        #         logger.info(f"  {i+1}. {doc_id}")
+        #     if len(same_cluster_docs) > 5:
+        #         logger.info(f"  ... và {len(same_cluster_docs) - 5} documents khác")
         
-        # Get entity neighbors
-        logger.info("🕸️ Getting entity neighbors...")
-        neighbor_entities = ["Apple", "technology", "artificial intelligence"]
-        for entity_name in neighbor_entities:
-            neighbors = await system.get_entity_neighbors(entity_name)
-            logger.info(f"  Neighbors of '{entity_name}': {len(neighbors)} connections")
-            for i, (neighbor, edge_data, node_data) in enumerate(neighbors[:3]):  # Chỉ hiển thị 3 neighbors đầu
-                logger.info(f"    {i+1}. {neighbor} - {edge_data.get('relation_description', 'N/A')}")
+        # # Get entity neighbors
+        # logger.info("🕸️ Getting entity neighbors...")
+        # neighbor_entities = ["Apple", "technology", "artificial intelligence"]
+        # for entity_name in neighbor_entities:
+        #     neighbors = await system.get_entity_neighbors(entity_name)
+        #     logger.info(f"  Neighbors of '{entity_name}': {len(neighbors)} connections")
+        #     for i, (neighbor, edge_data, node_data) in enumerate(neighbors[:3]):  # Chỉ hiển thị 3 neighbors đầu
+        #         logger.info(f"    {i+1}. {neighbor} - {edge_data.get('relation_description', 'N/A')}")
         
         # ========================================
         # PHASE 7: FINAL STATISTICS
@@ -378,12 +389,12 @@ async def demo_full_workflow():
         logger.info("🎉 DEMO FULL WORKFLOW COMPLETED SUCCESSFULLY!")
         logger.info("="*60)
         logger.info("📋 Summary:")
-        logger.info(f"  📄 Processed {successful_inserts + sum(new_results)} documents")
+        logger.info(f"  📄 Processed {successful_inserts} documents")
         logger.info(f"  🎯 Created {clustering_result.get('n_clusters', 0)} clusters")
         logger.info(f"  📝 Generated {len(summaries) if 'summaries' in locals() and 'error' not in summaries else 0} summaries")
         logger.info(f"  🕸️ Built knowledge graph with {final_stats.get('graph', {}).get('nodes', 0)} nodes and {final_stats.get('graph', {}).get('edges', 0)} edges")
         logger.info("="*60)
-        
+        print(f"⏱️ Total time: {end_time - start_time:.2f} seconds")
     except Exception as e:
         logger.error(f"❌ Error in demo: {e}")
         import traceback
@@ -469,17 +480,19 @@ async def demo_simple_workflow():
 if __name__ == "__main__":
     # Chạy demo đầy đủ
     print("🎯 GraphRAG Full Workflow Demo")
-    print("="*50)
-    print("1. Full workflow với LLM (nếu có OpenAI API key)")
-    print("2. Simple workflow không cần LLM")
-    print("="*50)
+    # print("="*50)
+    # print("1. Full workflow với LLM (nếu có OpenAI API key)")
+    # print("2. Simple workflow không cần LLM")
+    # print("="*50)
     
-    choice = input("Chọn demo (1 hoặc 2): ").strip()
+    asyncio.run(demo_full_workflow())
     
-    if choice == "1":
-        asyncio.run(demo_full_workflow())
-    elif choice == "2":
-        asyncio.run(demo_simple_workflow())
-    else:
-        print("Chạy demo đầy đủ...")
-        asyncio.run(demo_full_workflow()) 
+    # choice = input("Chọn demo (1 hoặc 2): ").strip()
+    
+    # if choice == "1":
+    #     asyncio.run(demo_full_workflow())
+    # elif choice == "2":
+    #     asyncio.run(demo_simple_workflow())
+    # else:
+    #     print("Chạy demo đầy đủ...")
+    #     asyncio.run(demo_full_workflow()) 
