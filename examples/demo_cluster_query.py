@@ -168,7 +168,7 @@ Answer:
         
         for query in retrieval_queries:
             print(f"\n❓ Query: {query}")
-            result = await system.query_cluster_summaries_with_mode(
+            result = await system.query_cluster_summaries(
                 query=query, 
                 mode="retrieval", 
                 top_k=3
@@ -197,7 +197,7 @@ Answer:
             
             for query in generation_queries:
                 print(f"\n❓ Query: {query}")
-                result = await system.query_cluster_summaries_with_mode(
+                result = await system.query_cluster_summaries(
                     query=query, 
                     mode="generation", 
                     top_k=3

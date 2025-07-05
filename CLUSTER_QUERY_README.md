@@ -18,22 +18,22 @@ Query → Vector DB (top_k) → Cluster Summaries → Mode Processing → Result
 
 ## API Methods
 
-### 1. Query với Mode
+### Query với Mode
 
 ```python
 # Query cluster summaries với mode cụ thể
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="artificial intelligence",
     mode="retrieval",  # hoặc "generation"
     top_k=5
 )
 ```
 
-### 2. Retrieval Mode
+### Retrieval Mode
 
 ```python
 # Chỉ lấy ra summaries phù hợp nhất từ vector DB
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="technology companies",
     mode="retrieval",
     top_k=3
@@ -56,11 +56,11 @@ result = await system.query_cluster_summaries_with_mode(
 }
 ```
 
-### 3. Generation Mode
+### Generation Mode
 
 ```python
 # Gen câu trả lời từ summaries từ vector DB
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="What are the main technology companies?",
     mode="generation",
     top_k=3
@@ -162,42 +162,54 @@ python run_all_demos.py
 
 ## Implementation Details
 
-### 1. ClusterSummaryGenerator
-
-```python
-class ClusterSummaryGenerator:
-    async def query_cluster_summaries(self,
-                                    query: str,
-                                    cluster_summaries: List[Dict[str, Any]],
-                                    mode: str = "retrieval") -> Dict[str, Any]:
-        """Query cluster summaries với 2 mode"""
-
-    async def _retrieval_mode(self, query, cluster_summaries):
-        """Mode retrieval: chỉ trả về summaries từ vector DB"""
-
-    async def _generation_mode(self, query, cluster_summaries):
-        """Mode generation: gen câu trả lời bằng LLM"""
-```
-
-### 2. GraphRAGSystem Integration
+### GraphRAGSystem Integration
 
 ```python
 class GraphRAGSystem:
-    async def query_cluster_summaries_with_mode(self,
-                                              query: str,
-                                              mode: str = "retrieval",
-                                              top_k: int = 5) -> Dict[str, Any]:
-        """Query cluster summaries với mode"""
+    async def query_cluster_summaries(self,
+                                    query: str,
+                                    top_k: int = 5,
+                                    mode: str = "retrieval") -> Dict[str, Any]:
+        """Query cluster summaries với 2 mode: retrieval và generation"""
 
         # 1. Query từ vector DB để lấy top_k results
         cluster_summaries = await self._cluster_summary_db.query(query, top_k)
 
-        # 2. Process theo mode
-        result = await self.cluster_summary_generator.query_cluster_summaries(
-            query, cluster_summaries, mode
-        )
+        if mode == "retrieval":
+            # Mode retrieval: chỉ trả về summaries
+            results = []
+            for summary in cluster_summaries:
+                results.append({
+                    "cluster_id": summary.get("cluster_id"),
+                    "summary": summary.get("summary_text"),
+                    "doc_hash_ids": summary.get("doc_hash_ids", []),
+                    "score": summary.get("distance", 0.0)
+                })
 
-        return result
+            return {
+                "mode": "retrieval",
+                "query": query,
+                "results": results,
+                "total_found": len(results)
+            }
+
+        elif mode == "generation":
+            # Mode generation: gen câu trả lời bằng LLM
+            # Tạo prompt và gọi LLM
+            prompt = self.cluster_summary_generator.query_generation_prompt_template.format(
+                query=query,
+                summaries=summaries_text
+            )
+
+            answer = await self.llm_client.generate(prompt)
+
+            return {
+                "mode": "generation",
+                "query": query,
+                "answer": answer.strip(),
+                "used_summaries": used_summaries,
+                "total_found": len(used_summaries)
+            }
 ```
 
 ## Error Handling
@@ -246,7 +258,7 @@ class GraphRAGSystem:
 
 ```python
 # Tìm clusters liên quan đến topic
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="machine learning algorithms",
     mode="retrieval",
     top_k=5
@@ -257,7 +269,7 @@ result = await system.query_cluster_summaries_with_mode(
 
 ```python
 # Trả lời câu hỏi từ cluster summaries
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="How do neural networks work?",
     mode="generation",
     top_k=3
@@ -268,7 +280,7 @@ result = await system.query_cluster_summaries_with_mode(
 
 ```python
 # Phân tích nội dung theo clusters
-result = await system.query_cluster_summaries_with_mode(
+result = await system.query_cluster_summaries(
     query="technology trends",
     mode="generation",
     top_k=5

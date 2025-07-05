@@ -933,48 +933,14 @@ class GraphRAGSystem:
             self.logger.error(f"Lỗi khi tạo cluster summaries: {e}")
             return {"error": str(e)}
     
-    async def query_cluster_summaries(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def query_cluster_summaries(self, query: str, top_k: int = 5, mode: str = "retrieval") -> Dict[str, Any]:
         """
-        Query cluster summaries từ vector DB
+        Query cluster summaries từ vector DB với 2 mode: retrieval và generation
         
         Args:
             query: Query string
-            top_k: Số kết quả tối đa
-            
-        Returns:
-            List các cluster summaries phù hợp
-        """
-        try:
-            # Query từ cluster summary VDB
-            results = await self._cluster_summary_db.query(query, top_k)
-            
-            # Format kết quả
-            formatted_results = []
-            for result in results:
-                formatted_results.append({
-                    "cluster_id": result.get("cluster_id"),
-                    "summary": result.get("summary_text"),
-                    "doc_hash_ids": result.get("doc_hash_ids", []),
-                    "score": result.get("score", 0.0)
-                })
-            
-            return formatted_results
-            
-        except Exception as e:
-            self.logger.error(f"Lỗi khi query cluster summaries: {e}")
-            return []
-    
-    async def query_cluster_summaries_with_mode(self, 
-                                              query: str, 
-                                              mode: str = "retrieval", 
-                                              top_k: int = 5) -> Dict[str, Any]:
-        """
-        Query cluster summaries với 2 mode: retrieval và generation
-        
-        Args:
-            query: Query string
-            mode: "retrieval" hoặc "generation"
             top_k: Số kết quả tối đa từ vector DB
+            mode: "retrieval" hoặc "generation"
             
         Returns:
             Dict chứa kết quả query theo mode
@@ -985,14 +951,74 @@ class GraphRAGSystem:
             # Query từ cluster summary VDB để lấy top_k results
             cluster_summaries = await self._cluster_summary_db.query(query, top_k)
             
-            # Sử dụng cluster summary generator để xử lý theo mode
-            result = await self.cluster_summary_generator.query_cluster_summaries(
-                query=query,
-                cluster_summaries=cluster_summaries,
-                mode=mode
-            )
+            if mode == "retrieval":
+                # Mode retrieval: chỉ trả về summaries
+                results = []
+                for summary in cluster_summaries:
+                    results.append({
+                        "cluster_id": summary.get("cluster_id"),
+                        "summary": summary.get("summary_text"),
+                        "doc_hash_ids": summary.get("doc_hash_ids", []),
+                        "score": summary.get("distance", 0.0)
+                    })
+                
+                return {
+                    "mode": "retrieval",
+                    "query": query,
+                    "results": results,
+                    "total_found": len(results)
+                }
             
-            return result
+            elif mode == "generation":
+                # Mode generation: gen câu trả lời bằng LLM
+                if not self.llm_client:
+                    self.logger.warning("Không có LLM client, fallback về retrieval mode")
+                    return await self.query_cluster_summaries(query, top_k, "retrieval")
+                
+                if not cluster_summaries:
+                    return {
+                        "mode": "generation",
+                        "query": query,
+                        "answer": "Không tìm thấy thông tin liên quan để trả lời câu hỏi.",
+                        "used_summaries": [],
+                        "total_found": 0
+                    }
+                
+                # Tạo prompt cho generation
+                summaries_text = "\n\n".join([
+                    f"Cluster {summary.get('cluster_id')}: {summary.get('summary_text', summary.get('summary', ''))}"
+                    for summary in cluster_summaries
+                ])
+                
+                prompt = self.cluster_summary_generator.query_generation_prompt_template.format(
+                    query=query,
+                    summaries=summaries_text
+                )
+                
+                # Gọi LLM để tạo câu trả lời
+                self.logger.info("Đang tạo câu trả lời bằng LLM...")
+                answer = await self.llm_client.generate(prompt)
+                
+                # Format kết quả
+                used_summaries = []
+                for summary in cluster_summaries:
+                    used_summaries.append({
+                        "cluster_id": summary.get("cluster_id"),
+                        "summary": summary.get("summary_text", summary.get("summary", "")),
+                        "doc_hash_ids": summary.get("doc_hash_ids", []),
+                        "score": summary.get("distance", 0.0)
+                    })
+                
+                return {
+                    "mode": "generation",
+                    "query": query,
+                    "answer": answer.strip(),
+                    "used_summaries": used_summaries,
+                    "total_found": len(used_summaries)
+                }
+            
+            else:
+                raise ValueError(f"Mode không hợp lệ: {mode}. Chỉ hỗ trợ 'retrieval' hoặc 'generation'")
             
         except Exception as e:
             self.logger.error(f"Lỗi khi query cluster summaries với mode {mode}: {e}")
