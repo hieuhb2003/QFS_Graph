@@ -115,7 +115,8 @@ class GraphRAGSystem:
             max_workers=summary_config.get('max_workers', 4),
             context_length=summary_config.get('context_length', 4096),
             summary_prompt_template=summary_config.get('summary_prompt_template'),
-            map_reduce_prompt_template=summary_config.get('map_reduce_prompt_template')
+            map_reduce_prompt_template=summary_config.get('map_reduce_prompt_template'),
+            query_generation_prompt_template=summary_config.get('query_generation_prompt_template')
         )
         
         # Khởi tạo operators
@@ -962,6 +963,46 @@ class GraphRAGSystem:
         except Exception as e:
             self.logger.error(f"Lỗi khi query cluster summaries: {e}")
             return []
+    
+    async def query_cluster_summaries_with_mode(self, 
+                                              query: str, 
+                                              mode: str = "retrieval", 
+                                              top_k: int = 5) -> Dict[str, Any]:
+        """
+        Query cluster summaries với 2 mode: retrieval và generation
+        
+        Args:
+            query: Query string
+            mode: "retrieval" hoặc "generation"
+            top_k: Số kết quả tối đa từ vector DB
+            
+        Returns:
+            Dict chứa kết quả query theo mode
+        """
+        try:
+            self.logger.info(f"Querying cluster summaries with mode: {mode}")
+            
+            # Query từ cluster summary VDB để lấy top_k results
+            cluster_summaries = await self._cluster_summary_db.query(query, top_k)
+            
+            # Sử dụng cluster summary generator để xử lý theo mode
+            result = await self.cluster_summary_generator.query_cluster_summaries(
+                query=query,
+                cluster_summaries=cluster_summaries,
+                mode=mode
+            )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi khi query cluster summaries với mode {mode}: {e}")
+            return {
+                "error": str(e),
+                "mode": mode,
+                "query": query,
+                "results": [] if mode == "retrieval" else None,
+                "answer": None if mode == "generation" else None
+            }
     
     async def get_documents_with_same_cluster(self, doc_id: str) -> List[str]:
         """

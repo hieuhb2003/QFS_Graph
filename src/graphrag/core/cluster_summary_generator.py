@@ -5,7 +5,7 @@ Tạo summary cho clusters bằng LLM với map-reduce
 
 import asyncio
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
 
@@ -21,7 +21,8 @@ class ClusterSummaryGenerator:
                  max_workers: int = 4,
                  context_length: int = 4096,
                  summary_prompt_template: Optional[str] = None,
-                 map_reduce_prompt_template: Optional[str] = None):
+                 map_reduce_prompt_template: Optional[str] = None,
+                 query_generation_prompt_template: Optional[str] = None):
         """
         Khởi tạo ClusterSummaryGenerator
         
@@ -31,6 +32,7 @@ class ClusterSummaryGenerator:
             context_length: Độ dài context tối đa
             summary_prompt_template: Template cho summary prompt
             map_reduce_prompt_template: Template cho map-reduce prompt
+            query_generation_prompt_template: Template cho query generation prompt
         """
         self.llm_client = llm_client
         self.max_workers = max_workers
@@ -67,6 +69,24 @@ Requirements:
 5. Ensure consistency and logical flow
 
 Comprehensive Summary:
+"""
+        
+        self.query_generation_prompt_template = query_generation_prompt_template or """
+You are an expert assistant. Based on the following cluster summaries, please provide a comprehensive answer to the user's question.
+
+User Question: {query}
+
+Relevant Cluster Summaries:
+{summaries}
+
+Requirements:
+1. Answer the question based on the information in the cluster summaries
+2. Provide specific details and examples from the summaries
+3. If the information is not available in the summaries, clearly state that
+4. Keep the answer well-structured and informative
+5. Cite which clusters the information comes from when relevant
+
+Answer:
 """
     
     async def generate_cluster_summaries(self, 
@@ -295,13 +315,15 @@ Comprehensive Summary:
     
     def update_prompt_templates(self, 
                               summary_prompt_template: Optional[str] = None,
-                              map_reduce_prompt_template: Optional[str] = None):
+                              map_reduce_prompt_template: Optional[str] = None,
+                              query_generation_prompt_template: Optional[str] = None):
         """
         Cập nhật prompt templates
         
         Args:
             summary_prompt_template: Template mới cho summary
             map_reduce_prompt_template: Template mới cho map-reduce
+            query_generation_prompt_template: Template mới cho query generation
         """
         if summary_prompt_template:
             self.summary_prompt_template = summary_prompt_template
@@ -309,4 +331,132 @@ Comprehensive Summary:
         if map_reduce_prompt_template:
             self.map_reduce_prompt_template = map_reduce_prompt_template
         
-        self.logger.info("Đã cập nhật prompt templates") 
+        if query_generation_prompt_template:
+            self.query_generation_prompt_template = query_generation_prompt_template
+        
+        self.logger.info("Đã cập nhật prompt templates")
+    
+    async def query_cluster_summaries(self, 
+                                    query: str, 
+                                    cluster_summaries: List[Dict[str, Any]], 
+                                    mode: str = "retrieval") -> Dict[str, Any]:
+        """
+        Query cluster summaries với 2 mode: retrieval và generation
+        
+        Args:
+            query: Query string
+            cluster_summaries: List các cluster summaries từ vector DB (đã được top_k)
+            mode: "retrieval" hoặc "generation"
+            
+        Returns:
+            Dict chứa kết quả query
+        """
+        try:
+            self.logger.info(f"Querying cluster summaries with mode: {mode}")
+            
+            if mode == "retrieval":
+                return await self._retrieval_mode(query, cluster_summaries)
+            elif mode == "generation":
+                return await self._generation_mode(query, cluster_summaries)
+            else:
+                raise ValueError(f"Mode không hợp lệ: {mode}. Chỉ hỗ trợ 'retrieval' hoặc 'generation'")
+                
+        except Exception as e:
+            self.logger.error(f"Lỗi khi query cluster summaries: {e}")
+            return {
+                "error": str(e),
+                "mode": mode,
+                "query": query
+            }
+    
+    async def _retrieval_mode(self, 
+                            query: str, 
+                            cluster_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Mode retrieval: chỉ trả về summaries đã được top_k từ vector DB"""
+        try:
+            # Format kết quả từ vector DB
+            results = []
+            for summary in cluster_summaries:
+                results.append({
+                    "cluster_id": summary.get("cluster_id"),
+                    "summary": summary.get("summary_text", summary.get("summary", "")),
+                    "doc_hash_ids": summary.get("doc_hash_ids", []),
+                    "score": summary.get("distance", 0.0)  # Vector DB trả về distance
+                })
+            
+            return {
+                "mode": "retrieval",
+                "query": query,
+                "results": results,
+                "total_found": len(results)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi trong retrieval mode: {e}")
+            return {
+                "mode": "retrieval",
+                "query": query,
+                "error": str(e),
+                "results": []
+            }
+    
+    async def _generation_mode(self, 
+                             query: str, 
+                             cluster_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Mode generation: gen câu trả lời từ summaries đã được top_k"""
+        try:
+            if not self.llm_client:
+                self.logger.warning("Không có LLM client, fallback về retrieval mode")
+                return await self._retrieval_mode(query, cluster_summaries)
+            
+            if not cluster_summaries:
+                return {
+                    "mode": "generation",
+                    "query": query,
+                    "answer": "Không tìm thấy thông tin liên quan để trả lời câu hỏi.",
+                    "used_summaries": [],
+                    "total_found": 0
+                }
+            
+            # Tạo prompt cho generation
+            summaries_text = "\n\n".join([
+                f"Cluster {summary.get('cluster_id')}: {summary.get('summary_text', summary.get('summary', ''))}"
+                for summary in cluster_summaries
+            ])
+            
+            prompt = self.query_generation_prompt_template.format(
+                query=query,
+                summaries=summaries_text
+            )
+            
+            # Gọi LLM để tạo câu trả lời
+            self.logger.info("Đang tạo câu trả lời bằng LLM...")
+            answer = await self.llm_client.generate_text(prompt)
+            
+            # Format kết quả
+            used_summaries = []
+            for summary in cluster_summaries:
+                used_summaries.append({
+                    "cluster_id": summary.get("cluster_id"),
+                    "summary": summary.get("summary_text", summary.get("summary", "")),
+                    "doc_hash_ids": summary.get("doc_hash_ids", []),
+                    "score": summary.get("distance", 0.0)
+                })
+            
+            return {
+                "mode": "generation",
+                "query": query,
+                "answer": answer.strip(),
+                "used_summaries": used_summaries,
+                "total_found": len(used_summaries)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Lỗi trong generation mode: {e}")
+            return {
+                "mode": "generation",
+                "query": query,
+                "error": str(e),
+                "answer": f"Lỗi khi tạo câu trả lời: {str(e)}",
+                "used_summaries": []
+            } 

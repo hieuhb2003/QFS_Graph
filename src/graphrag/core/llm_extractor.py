@@ -41,6 +41,7 @@ Rules:
 3. Use clear, concise descriptions
 4. Follow the exact format with <entity> and <relation> tags
 5. Use <SEP> as separator between fields
+6. If the text is in Vietnamese, please extract the entities and relations in Vietnamese
 
 Output:
 """

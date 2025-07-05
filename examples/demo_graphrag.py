@@ -21,7 +21,7 @@ async def demo_graphrag_system():
     )
     
     # Cấu hình hệ thống
-    working_dir = "./graphrag_data"
+    working_dir = "./graphrag_data_2"
     global_config = {
         "working_dir": working_dir,
         "save_interval": 10,
@@ -176,20 +176,38 @@ async def demo_graphrag_system():
             """
         }
     ]
+
+    docs = [
+        # "San Antonio Spurs The San Antonio Spurs are an American professional basketball team based in San Antonio, Texas. The Spurs compete in the National Basketball Association (NBA) as a member of the league's Western Conference Southwest Division. The team plays its home games at the AT&T Center in San Antonio. The Spurs are one of four former American Basketball Association (ABA) teams to remain intact in the NBA after the 1976 ABA–NBA merger and the only former ABA team to have won an NBA championship. The Spurs' five NBA championships are the fifth most in history behind only the Boston",
+        # "The arena seats 18,624 for basketball games and 17,565 for ice hockey games. The Bruins were the first American member of the National Hockey League and an Original Six franchise. The Boston Celtics were founding members of the Basketball Association of America, one of the two leagues that merged to form the NBA. The Celtics have the distinction of having won more championships than any other NBA team, with seventeen. While they have played in suburban Foxborough since 1971, the New England Patriots of the National Football League were founded in 1960 as the Boston Patriots, changing their name after",
+        # "San Antonio Spurs là một đội bóng rổ chuyên nghiệp của Mỹ có trụ sở tại San Antonio, Texas. Spurs cạnh tranh trong Hiệp hội Bóng rổ Quốc gia (NBA) với tư cách là thành viên của Phân khu Tây Nam của Hội nghị Western. Đội chơi các trận đấu trên sân nhà tại Trung tâm AT&T ở San Antonio. Spurs là một trong bốn đội cũ của Hiệp hội Bóng rổ Mỹ (ABA) còn tồn tại trong NBA sau việc sáp nhập ABA-NBA năm 1976 và là đội cũ duy nhất của ABA đã giành chức vô địch NBA. Năm chức vô địch NBA của Spurs đứng thứ năm trong lịch sử, chỉ sau Boston",
+        # "in the 16th century, Jesuits arrived in Beijing via Guangzhou. The most famous amongst them was Matteo Ricci, an Italian mathematician who came to China in 1588 and lived in Beijing. Ricci was welcomed at the imperial court and introduced Western learning into China. The Jesuits followed a policy of adaptation of Catholicism to traditional Chinese religious practices, especially ancestor worship. However, such practices were eventually condemned as polytheistic idolatry by the popes Clement XI, Clement XII and Benedict XIV. Roman Catholic missions struggled in obscurity for decades afterwards. Christianity began to take root in a significant way in the",
+        # "or Mount Penglai. Han-era Daoists assembled into small groups of hermits who attempted to achieve immortality through breathing exercises, sexual techniques and use of medical elixirs. By the 2nd century AD, Daoists formed large hierarchical religious societies such as the Way of the Five Pecks of Rice. Its followers believed that the sage-philosopher Laozi (fl. 6th century BC) was a holy prophet who would offer salvation and good health if his devout followers would confess their sins, ban the worship of unclean gods who accepted meat sacrifices and chant sections of the \"Daodejing\". Buddhism first entered China during the Eastern",
+        # "a major Buddhist centre by the middle of the 2nd century. Knowledge among people on the silk roads also increased when Emperor Ashoka of the Maurya dynasty (268–239 BCE) converted to Buddhism and raised the religion to official status in his northern Indian empire. From the 4th century CE onward, Chinese pilgrims also started to travel on the Silk Road to India to get improved access to the original Buddhist scriptures, with Fa-hsien's pilgrimage to India (395–414), and later Xuanzang (629–644) and Hyecho, who traveled from Korea to India. The travels of the priest Xuanzang were fictionalized in the 16th",
+        "capital Luoyang in Emperor Ming's reign. Buddhism entered China via the Silk Road, transmitted by the Buddhist populations who inhabited the Western Regions (modern Xinjiang), then Indo-Europeans (predominantly Tocharians and Saka). It began to grow to become a significant influence in China proper only after the fall of the Han dynasty, in the period of political division. When Buddhism had become an established religion it began to compete with Chinese indigenous religion and Taoist movements, deprecatorily designated as Ways of Demons (鬼道 \"Guǐdào\") in Buddhist polemical literature. After the fall of the Han dynasty, a period of disunity defined as",
     
+        # "San Antonio Spurs là một đội bóng rổ chuyên nghiệp của Mỹ có trụ sở tại San Antonio, Texas. Spurs cạnh tranh trong Hiệp hội Bóng rổ Quốc gia (NBA) với tư cách là thành viên của Phân khu Tây Nam của Hội nghị Western. Đội chơi các trận đấu trên sân nhà tại Trung tâm AT&T ở San Antonio. Spurs là một trong bốn đội cũ của Hiệp hội Bóng rổ Mỹ (ABA) còn tồn tại trong NBA sau việc sáp nhập ABA-NBA năm 1976 và là đội cũ duy nhất của ABA đã giành chức vô địch NBA. Năm chức vô địch NBA của Spurs đứng thứ năm trong lịch sử, chỉ sau Boston"
+        # "Sân vận động có 18.624 chỗ ngồi cho các trận bóng rổ và 17.565 chỗ ngồi cho các trận khúc côn cầu trên băng. Bruins là thành viên Mỹ đầu tiên của National Hockey League và một trong sáu đội ban đầu. Boston Celtics là thành viên sáng lập của Hiệp hội Bóng rổ Mỹ, một trong hai giải đấu hợp nhất để hình thành NBA. Celtics có sự khác biệt khi đã giành được nhiều chức vô địch hơn bất kỳ đội nào khác của NBA, với mười bảy. Mặc dù họ đã chơi ở vùng ngoại ô Foxborough từ năm 1971, New England Patriots của Liên đoàn Bóng đá Quốc gia được thành lập vào năm 1960 với tên Boston Patriots, đổi tên sau",
+        # "Vào thế kỷ 16, các nhà truyền giáo Dòng Tên đến Bắc Kinh qua Quảng Châu. Người nổi tiếng nhất trong số họ là Matteo Ricci, một nhà toán học người Ý đến Trung Quốc vào năm 1588 và sống ở Bắc Kinh. Ricci được chào đón tại triều đình hoàng gia và giới thiệu học thuật phương Tây vào Trung Quốc. Các nhà truyền giáo Dòng Tên theo đuổi một chính sách thích nghi của Công giáo với các phong tục tôn giáo truyền thống của Trung Quốc, đặc biệt là việc thờ cúng tổ tiên. Tuy nhiên, những phong tục như vậy cuối cùng đã bị các giáo hoàng Clement XI, Clement XII và Benedict XIV lên án là sự thờ lạy đa thần. Các sứ mệnh Công giáo Rôma đã đấu tranh trong bóng tối trong nhiều thập kỷ sau đó. Kitô giáo bắt đầu phát triển một cách đáng kể ở",
+        # "hoặc Núi Penglai. Các nhà Đạo giáo thời Hán tụ họp thành các nhóm ẩn sĩ nhỏ cố gắng đạt được sự bất tử thông qua các bài tập thở, kỹ thuật tình dục và sử dụng thuốc tiên. Vào thế kỷ thứ 2 sau Công nguyên, các nhà Đạo giáo đã hình thành các xã hội tôn giáo phân cấp lớn như Con đường của Năm Pecks của Gạo. Những người theo đạo tin rằng nhà hiền triết Lão Tử (fl. Thế kỷ 6 trước Công nguyên) là một nhà tiên tri thiêng liêng sẽ mang lại sự cứu rỗi và sức khỏe tốt nếu những người theo đạo trung thành của ông thú nhận tội lỗi của mình, cấm việc thờ cúng các vị thần không sạch sẽ chấp nhận hy sinh thịt và đọc các phần của \"Đạo đức kinh\". Phật giáo lần đầu tiên进入 Trung Quốc trong thời kỳ Đông",
+        # "một trung tâm Phật giáo lớn vào giữa thế kỷ thứ 2. Kiến thức giữa những người trên con đường tơ lụa cũng tăng lên khi Hoàng đế Ashoka của triều đại Maurya (268–239 TCN) chuyển sang Phật giáo và nâng tôn giáo lên vị thế chính thức trong đế chế Bắc Ấn của ông. Từ thế kỷ thứ 4 sau Công nguyên, các nhà sư Trung Quốc cũng bắt đầu du hành trên Con đường Tơ lụa đến Ấn Độ để có được quyền truy cập tốt hơn vào các kinh điển Phật giáo nguyên bản, với chuyến hành hương của Fa-hsien đến Ấn Độ (395–414), và sau đó là Xuanzang (629–644) và Hyecho, người đã du hành từ Hàn Quốc đến Ấn Độ. Những chuyến du hành của nhà sư Xuanzang đã được hư cấu trong thế kỷ 16",
+        "thủ đô Lạc Dương trong triều đại của Hoàng đế Minh. Phật giáo du nhập vào Trung Quốc qua Con đường tơ lụa, được truyền bởi các dân tộc Phật tử cư trú tại các vùng phía Tây (Xinjiang hiện đại), sau đó là người Ấn-Âu (chủ yếu là người Tocharian và Saka). Nó bắt đầu phát triển để trở thành một ảnh hưởng đáng kể ở Trung Quốc chỉ sau khi nhà Hán sụp đổ, trong thời kỳ phân chia chính trị. Khi Phật giáo đã trở thành một tôn giáo được thành lập, nó bắt đầu cạnh tranh với các phong trào tôn giáo bản địa và Đạo giáo của Trung Quốc, được chỉ định một cách miệt thị là Con đường của Quỷ (鬼道 \"Guǐdào\") trong văn học tranh luận của Phật giáo."
+        ]    
+
     try:
         # Insert documents
         logger.info("Starting batch document insertion...")
         
         # Chuẩn bị documents cho batch processing - chỉ cần list of contents
-        documents_batch = [doc['content'] for doc in documents]
+        # documents_batch = [doc['content'] for doc in documents]
+        documents_batch = docs
         
         # Sử dụng batch processing thay vì tuần tự
         if llm_client:
             # Batch processing với LLM one-shot
             results = await system.insert_documents_batch_with_llm(
                 documents=documents_batch,
-                max_concurrent_docs=3  # Chạy song song tối đa 3 documents
+                max_concurrent_docs=5  # Chạy song song tối đa 3 documents
             )
         else:
             # Batch processing với chunking
