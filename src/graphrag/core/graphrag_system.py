@@ -100,7 +100,7 @@ class GraphRAGSystem:
         
         # Khởi tạo clustering manager
         clustering_config = global_config.get('clustering', {})
-        self.clustering_manager = ClusteringManager(
+        self._clustering_manager = ClusteringManager(
             embedding_client=embedding_client,
             outlier_threshold=clustering_config.get('outlier_threshold', 10),
             max_tokens=clustering_config.get('max_tokens', 8192),
@@ -829,7 +829,7 @@ class GraphRAGSystem:
             self.logger.info(f"Tìm thấy {len(successful_docs)} documents để cluster")
             
             # Thực hiện clustering
-            clustering_result = await self.clustering_manager.cluster_documents(successful_docs, doc_hash_ids)
+            clustering_result = await self._clustering_manager.cluster_documents(successful_docs, doc_hash_ids)
             
             # Tạo cluster summaries
             await self._generate_cluster_summaries(clustering_result)
@@ -864,7 +864,7 @@ class GraphRAGSystem:
                 new_doc_hash_ids.append(doc_hash_id)
             
             # Cập nhật clusters
-            clustering_result = await self.clustering_manager.update_clusters_with_new_data(
+            clustering_result = await self._clustering_manager.update_clusters_with_new_data(
                 new_documents, new_doc_hash_ids
             )
             
@@ -883,15 +883,15 @@ class GraphRAGSystem:
     
     async def get_cluster_info(self) -> Dict[str, Any]:
         """Lấy thông tin về clusters hiện tại"""
-        return await self.clustering_manager.get_cluster_info()
+        return await self._clustering_manager.get_cluster_info()
     
     async def get_documents_by_cluster(self, cluster_id: int) -> List[str]:
         """Lấy hash doc IDs thuộc cluster cụ thể"""
-        return await self.clustering_manager.get_documents_by_cluster(cluster_id)
+        return await self._clustering_manager.get_documents_by_cluster(cluster_id)
     
     async def get_cluster_doc_ids(self, cluster_id: int) -> List[str]:
         """Lấy hash doc IDs của cluster"""
-        return await self.clustering_manager.get_cluster_doc_ids(cluster_id)
+        return await self._clustering_manager.get_cluster_doc_ids(cluster_id)
     
     async def generate_cluster_summaries(self, max_workers: int = 4) -> Dict[int, str]:
         """
@@ -907,7 +907,7 @@ class GraphRAGSystem:
             self.logger.info("Bắt đầu tạo cluster summaries...")
             
             # Lấy cluster documents
-            cluster_info = await self.clustering_manager.get_cluster_info()
+            cluster_info = await self._clustering_manager.get_cluster_info()
             cluster_documents = cluster_info.get("cluster_documents", {})
             
             # Lấy document contents
@@ -924,7 +924,7 @@ class GraphRAGSystem:
             # Lưu summaries vào clustering manager
             for cluster_id, summary in summaries.items():
                 doc_hash_ids = cluster_documents.get(cluster_id, [])
-                await self.clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
+                await self._clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
             
             self.logger.info(f"Hoàn thành tạo summaries cho {len(summaries)} clusters")
             return summaries
@@ -1016,14 +1016,14 @@ class GraphRAGSystem:
         """
         try:
             # Lấy cluster_id của document
-            cluster_assignments = await self.clustering_manager.get_cluster_info()
+            cluster_assignments = await self._clustering_manager.get_cluster_info()
             cluster_id = cluster_assignments.get("cluster_assignments", {}).get(doc_id)
             
             if cluster_id is None:
                 return []
             
             # Lấy tất cả documents cùng cluster
-            cluster_docs = await self.clustering_manager.get_documents_by_cluster(cluster_id)
+            cluster_docs = await self._clustering_manager.get_documents_by_cluster(cluster_id)
             
             # Loại bỏ document hiện tại
             cluster_docs = [doc for doc in cluster_docs if doc != doc_id]
@@ -1051,7 +1051,7 @@ class GraphRAGSystem:
             # Lưu vào clustering manager
             for cluster_id, summary in summaries.items():
                 doc_hash_ids = cluster_documents.get(cluster_id, [])
-                await self.clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
+                await self._clustering_manager.save_cluster_summary(cluster_id, summary, doc_hash_ids)
                 
         except Exception as e:
             self.logger.error(f"Lỗi khi tạo cluster summaries: {e}")
@@ -1083,7 +1083,7 @@ class GraphRAGSystem:
                 summary_key = f"cluster_summary_{cluster_id}"
                 
                 # Lấy doc_hash_ids của cluster
-                doc_hash_ids = await self.clustering_manager.get_cluster_doc_ids(cluster_id)
+                doc_hash_ids = await self._clustering_manager.get_cluster_doc_ids(cluster_id)
                 
                 summary_data[summary_key] = {
                     "content": summary,
@@ -1145,7 +1145,7 @@ class GraphRAGSystem:
     @property
     def cluster_summary_db(self):
         return self._cluster_summary_db
-    
+
     @property
     def clustering_manager(self):
-        return self.clustering_manager 
+        return self._clustering_manager

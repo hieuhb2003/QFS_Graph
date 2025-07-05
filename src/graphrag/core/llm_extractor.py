@@ -100,7 +100,7 @@ Output:
             response = await self.llm_client.generate(
                 prompt=prompt,
                 temperature=0.1,  # Low temperature for consistent extraction
-                max_tokens=2048
+                # max_tokens=2048
             )
             
             self.logger.debug(f"LLM response received (length: {len(response)})")

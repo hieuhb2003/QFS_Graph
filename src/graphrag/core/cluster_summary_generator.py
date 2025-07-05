@@ -37,28 +37,45 @@ class ClusterSummaryGenerator:
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.context_length = context_length
-        self.logger = get_logger(__name__)
+        self.logger = get_logger()
         
         # Default prompt templates
         self.summary_prompt_template = summary_prompt_template or """
-You are an expert document analyst. Please create a concise and accurate summary for the following documents:
+You are a highly skilled data analyst AI. Your task is to extract the core information from a set of documents. This summary will be used later to synthesize a larger picture.
+
+Your goal is to create a dense, factual summary. Focus on answering "Who? What? When? Where? Why?".
 
 Documents:
 {documents}
 
-Requirements:
-1. Summarize the main content of the documents
-2. Identify key topics and important concepts
-3. Create a well-structured summary
-4. Keep the summary under 300 words
+Instructions:
+1.  Identify the Central Theme: What is the single most important topic, event, or entity discussed in these documents?
+2.  Extract Key Entities: List the key people, organizations, locations, and specific terms mentioned.
+3.  Synthesize: Based on the above, write a concise, neutral, and factual paragraph summarizing the main points. Do NOT add opinions or interpretations. Focus only on the information present in the text.
 
-Summary:
+Dense Summary:
 """
         
         self.map_reduce_prompt_template = map_reduce_prompt_template or """
-You are an expert document analyst. Please create a comprehensive summary from the following sub-summaries:
+You are an expert information synthesizer. You have been given several sub-summaries from a single, coherent cluster of documents. Your task is to intelligently merge them into a final, comprehensive, and non-redundant summary.
 
 Sub-summaries:
+{summaries}
+
+Instructions:
+1.  Synthesize, Don't Stack: Read all sub-summaries to understand the complete picture. Do NOT simply list the points from each one. Instead, weave them into a single, coherent narrative.
+2.  De-duplicate: Identify and merge overlapping information. If multiple summaries mention the same event or fact, present it only once in the final summary.
+3.  Provide a Holistic View: The final summary must represent the entire cluster as a whole, capturing its main theme, key actors, and primary outcomes. It should be a self-contained, easy-to-read paragraph.
+
+Final Comprehensive Summary:
+"""
+        
+        self.query_generation_prompt_template = query_generation_prompt_template or """
+You are an expert assistant. Based on the following cluster summaries, please provide a comprehensive answer to the user's question.
+
+User Question: {query}
+
+Relevant Cluster Summaries:
 {summaries}
 
 Requirements:
@@ -213,7 +230,7 @@ Answer:
             prompt = self.map_reduce_prompt_template.format(summaries=summaries_text)
             
             # Gọi LLM để tạo summary tổng hợp
-            response = await self.llm_client.generate_text(prompt)
+            response = await self.llm_client.generate(prompt)
             
             return response.strip()
             
@@ -270,7 +287,7 @@ Answer:
             prompt = self.summary_prompt_template.format(documents=documents_text)
             
             # Gọi LLM để tạo summary
-            response = await self.llm_client.generate_text(prompt)
+            response = await self.llm_client.generate(prompt)
             
             return response.strip()
             

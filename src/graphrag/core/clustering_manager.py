@@ -48,7 +48,7 @@ class ClusteringManager:
         self.max_tokens = max_tokens
         self.batch_size = batch_size
         self.model_save_path = model_save_path
-        self.logger = get_logger(__name__)
+        self.logger = get_logger()
         
         # Best parameters từ grid search
         self.best_params = {
@@ -72,7 +72,7 @@ class ClusteringManager:
         
         # Thông tin chi tiết về clusters
         self.cluster_assignments = {}  # {doc_hash_id: cluster_id}
-        self.cluster_documents = {}    # {cluster_id: [doc_hash_ids]}
+        self.cluster_docs_map = {}    # {cluster_id: [doc_hash_ids]}
         self.document_hash_ids = []    # [doc_hash_id1, doc_hash_id2, ...]
         
         # Cluster info storage
@@ -134,7 +134,7 @@ class ClusteringManager:
         embeddings = []
         for i in range(0, len(documents), self.batch_size):
             batch = documents[i:i + self.batch_size]
-            batch_embeddings = await self.embedding_client.embed_texts(batch)
+            batch_embeddings = await self.embedding_client.embed(batch)
             embeddings.extend(batch_embeddings)
         
         embeddings = np.array(embeddings)
@@ -151,9 +151,9 @@ class ClusteringManager:
             self.cluster_assignments[doc_hash_id] = topic
             
             # Lưu vào cluster documents
-            if topic not in self.cluster_documents:
-                self.cluster_documents[topic] = []
-            self.cluster_documents[topic].append(doc_hash_id)
+            if topic not in self.cluster_docs_map:
+                self.cluster_docs_map[topic] = []
+            self.cluster_docs_map[topic].append(doc_hash_id)
     
     async def cluster_documents(self, documents: List[str], doc_hash_ids: List[str]) -> Dict[str, Any]:
         """
@@ -223,7 +223,7 @@ class ClusteringManager:
             'outlier_docs': len(outlier_docs),
             'n_clusters': len(set(topics)) - (1 if -1 in topics else 0),
             'cluster_assignments': self.cluster_assignments.copy(),
-            'cluster_documents': {k: v.copy() for k, v in self.cluster_documents.items()}
+            'cluster_docs_map': {k: v.copy() for k, v in self.cluster_docs_map.items()}
         })
         
         # Lưu model
@@ -235,7 +235,7 @@ class ClusteringManager:
             'outlier_documents': len(outlier_docs),
             'n_clusters': len(set(topics)) - (1 if -1 in topics else 0),
             'cluster_assignments': self.cluster_assignments,
-            'cluster_documents': self.cluster_documents,
+            'cluster_documents': self.cluster_docs_map,
             'cluster_info': self.cluster_info_storage
         }
         
@@ -321,7 +321,7 @@ class ClusteringManager:
             'new_outliers': len(outlier_new_docs),
             'total_outliers': len(self.outlier_docs),
             'cluster_assignments': self.cluster_assignments.copy(),
-            'cluster_documents': {k: v.copy() for k, v in self.cluster_documents.items()}
+            'cluster_docs_map': {k: v.copy() for k, v in self.cluster_docs_map.items()}
         })
         
         # Lưu model
@@ -333,7 +333,7 @@ class ClusteringManager:
             'new_outliers': len(outlier_new_docs),
             'total_outliers': len(self.outlier_docs),
             'cluster_assignments': self.cluster_assignments,
-            'cluster_documents': self.cluster_documents,
+            'cluster_documents': self.cluster_docs_map,
             'cluster_info': self.cluster_info_storage
         }
         
@@ -428,7 +428,7 @@ class ClusteringManager:
         """Tạo cluster info từ cluster assignments"""
         self.cluster_info_storage = {}
         
-        for cluster_id, doc_hash_ids in self.cluster_documents.items():
+        for cluster_id, doc_hash_ids in self.cluster_docs_map.items():
             if cluster_id == -1:  # Outlier cluster
                 continue
                 
@@ -474,7 +474,7 @@ class ClusteringManager:
             'cluster_history': self.cluster_history,
             'best_params': self.best_params,
             'cluster_assignments': self.cluster_assignments,
-            'cluster_documents': self.cluster_documents,
+            'cluster_docs_map': self.cluster_docs_map,
             'document_hash_ids': self.document_hash_ids,
             'cluster_info_storage': self.cluster_info_storage
         }
@@ -527,7 +527,7 @@ class ClusteringManager:
             self.cluster_history = data['cluster_history']
             self.best_params = data['best_params']
             self.cluster_assignments = data.get('cluster_assignments', {})
-            self.cluster_documents = data.get('cluster_documents', {})
+            self.cluster_docs_map = data.get('cluster_docs_map', data.get('cluster_documents', {}))
             self.document_hash_ids = data.get('document_hash_ids', [])
             self.cluster_info_storage = data.get('cluster_info_storage', {})
         else:
@@ -542,20 +542,20 @@ class ClusteringManager:
         
         return {
             "total_documents": len(self.all_docs),
-            "total_clusters": len([k for k in self.cluster_documents.keys() if k != -1]),
+            "total_clusters": len([k for k in self.cluster_docs_map.keys() if k != -1]),
             "outlier_documents": len(self.outlier_docs),
             "cluster_assignments": self.cluster_assignments,
-            "cluster_documents": self.cluster_documents,
+            "cluster_documents": self.cluster_docs_map,
             "cluster_info": self.cluster_info_storage,
             "cluster_history": self.cluster_history
         }
     
     async def get_documents_by_cluster(self, cluster_id: int) -> List[str]:
         """Lấy hash doc IDs thuộc cluster cụ thể"""
-        if cluster_id not in self.cluster_documents:
+        if cluster_id not in self.cluster_docs_map:
             return []
         
-        return self.cluster_documents[cluster_id]
+        return self.cluster_docs_map[cluster_id]
     
     async def get_cluster_doc_ids(self, cluster_id: int) -> List[str]:
         """Lấy hash doc IDs của cluster"""
@@ -567,7 +567,7 @@ class ClusteringManager:
                     outlier_doc_hash_ids.append(doc_hash_id)
             return outlier_doc_hash_ids
         else:
-            return self.cluster_documents.get(cluster_id, [])
+            return self.cluster_docs_map.get(cluster_id, [])
     
     async def save_cluster_summary(self, cluster_id: int, summary: str, 
                                   doc_hash_ids: List[str]) -> None:
